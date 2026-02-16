@@ -1,3 +1,4 @@
 *.log
 *.wav
 __pycache__/
+.claude/
