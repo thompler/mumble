@@ -209,6 +209,9 @@ def stop_recording_and_transcribe():
     # Collapse spaces between individual digits: "1 2 3 4" → "1234"
     text = re.sub(r'(?<=\d) (?=\d)', '', text)
 
+    # Collapse runs of multiple spaces into one
+    text = re.sub(r' {2,}', ' ', text)
+
     log.info(f"Transcribed: {text}")
 
     global last_transcription
