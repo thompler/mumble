@@ -80,6 +80,7 @@ _DEFAULTS = {
     },
     "audio": {
         "device_name": "C200",
+        "max_duration": 90,
     },
 }
 
@@ -108,6 +109,7 @@ REPASTE_HOTKEY = _get("hotkeys", "repaste")
 MODEL = _get("whisper", "model")
 WHISPER_RATE = _get("whisper", "sample_rate")
 DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
+MAX_DURATION = _get("audio", "max_duration")
 
 LOG_FILE = os.path.join(_log_dir(), "mumble.log")
 
@@ -131,6 +133,7 @@ record_rate = 48000
 input_stream = None
 tray_icon = None
 shutdown_event = threading.Event()
+recording_timer = None
 
 
 # --- Tray icon ---
@@ -336,9 +339,12 @@ def stop_stream():
 
 def cancel_recording():
     """Cancel recording and discard audio."""
-    global audio_chunks
+    global audio_chunks, recording_timer
     if not recording:
         return
+    if recording_timer is not None:
+        recording_timer.cancel()
+        recording_timer = None
     stop_stream()
     audio_chunks = []
     update_tray(False)
@@ -346,9 +352,15 @@ def cancel_recording():
     winsound.Beep(300, 200)
 
 
+def _timeout_cancel():
+    """Auto-cancel recording after MAX_DURATION seconds."""
+    log.info(f"Recording timeout ({MAX_DURATION}s) — auto-cancelling")
+    cancel_recording()
+
+
 def toggle_recording():
     """Toggle recording on/off on hotkey press."""
-    global recording
+    global recording, recording_timer
 
     if not recording:
         recording = True
@@ -356,7 +368,13 @@ def toggle_recording():
         winsound.Beep(1000, 150)
         update_tray(True)
         start_recording()
+        recording_timer = threading.Timer(MAX_DURATION, _timeout_cancel)
+        recording_timer.daemon = True
+        recording_timer.start()
     else:
+        if recording_timer is not None:
+            recording_timer.cancel()
+            recording_timer = None
         recording = False
         log.info("Stopped, transcribing...")
         winsound.Beep(500, 150)
