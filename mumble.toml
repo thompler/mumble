@@ -1,0 +1,12 @@
+[hotkeys]
+record = "ctrl+alt+space"
+cancel = "ctrl+alt+x"
+quit = "ctrl+alt+q"
+repaste = "ctrl+alt+v"
+
+[whisper]
+model = "small.en"
+sample_rate = 16000
+
+[audio]
+device_name = "C200"

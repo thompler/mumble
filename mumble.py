@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import time
+import tomllib
 import winsound
 from math import gcd
 
@@ -31,13 +32,49 @@ from pynput.keyboard import Controller as KBController, Key
 import pystray
 
 # --- Config ---
-HOTKEY = "ctrl+alt+space"
-CANCEL_HOTKEY = "ctrl+alt+x"
-QUIT_HOTKEY = "ctrl+alt+q"
-REPASTE_HOTKEY = "ctrl+alt+v"
-MODEL = "small.en"
-DEVICE_NAME_SUBSTRING = "C200"
-WHISPER_RATE = 16000
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mumble.toml")
+
+_DEFAULTS = {
+    "hotkeys": {
+        "record": "ctrl+alt+space",
+        "cancel": "ctrl+alt+x",
+        "quit": "ctrl+alt+q",
+        "repaste": "ctrl+alt+v",
+    },
+    "whisper": {
+        "model": "small.en",
+        "sample_rate": 16000,
+    },
+    "audio": {
+        "device_name": "C200",
+    },
+}
+
+def _load_config():
+    """Load config from mumble.toml, falling back to defaults if missing."""
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "rb") as f:
+            cfg = tomllib.load(f)
+    else:
+        logging.getLogger("mumble").warning(
+            f"Config file not found ({CONFIG_PATH}), using defaults"
+        )
+        cfg = {}
+
+    def _get(section, key):
+        return cfg.get(section, {}).get(key, _DEFAULTS[section][key])
+
+    return _get
+
+_get = _load_config()
+
+HOTKEY = _get("hotkeys", "record")
+CANCEL_HOTKEY = _get("hotkeys", "cancel")
+QUIT_HOTKEY = _get("hotkeys", "quit")
+REPASTE_HOTKEY = _get("hotkeys", "repaste")
+MODEL = _get("whisper", "model")
+WHISPER_RATE = _get("whisper", "sample_rate")
+DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 
 # --- Logging ---
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mumble.log")

@@ -41,7 +41,7 @@ The first run will download the Whisper model (~500 MB).
 
 ### Microphone
 
-By default, Mumble looks for an **Anker C200** mic by name. If not found, it falls back to the system default input device. To change the target mic, edit `DEVICE_NAME_SUBSTRING` in `mumble.py`.
+By default, Mumble looks for an **Anker C200** mic by name. If not found, it falls back to the system default input device. To change the target mic, edit `device_name` in `mumble.toml`.
 
 ## Running
 
@@ -82,14 +82,29 @@ Logs are written to `mumble.log` in the same directory as `mumble.py`. The log r
 
 ## Configuration
 
-All settings are constants at the top of `mumble.py`:
+Settings live in `mumble.toml` (same directory as `mumble.py`). If the file is missing, Mumble falls back to built-in defaults.
 
-| Constant | Default | Description |
+```toml
+[hotkeys]
+record = "ctrl+alt+space"
+cancel = "ctrl+alt+x"
+quit = "ctrl+alt+q"
+repaste = "ctrl+alt+v"
+
+[whisper]
+model = "small.en"
+sample_rate = 16000
+
+[audio]
+device_name = "C200"
+```
+
+| Key | Default | Description |
 |---|---|---|
-| `HOTKEY` | `ctrl+alt+space` | Toggle recording |
-| `CANCEL_HOTKEY` | `ctrl+alt+x` | Cancel recording |
-| `QUIT_HOTKEY` | `ctrl+alt+q` | Quit |
-| `REPASTE_HOTKEY` | `ctrl+alt+v` | Re-paste last result |
-| `MODEL` | `small.en` | Whisper model size |
-| `DEVICE_NAME_SUBSTRING` | `C200` | Mic name to search for |
-| `WHISPER_RATE` | `16000` | Target sample rate for Whisper |
+| `hotkeys.record` | `ctrl+alt+space` | Toggle recording |
+| `hotkeys.cancel` | `ctrl+alt+x` | Cancel recording |
+| `hotkeys.quit` | `ctrl+alt+q` | Quit |
+| `hotkeys.repaste` | `ctrl+alt+v` | Re-paste last result |
+| `whisper.model` | `small.en` | Whisper model size |
+| `whisper.sample_rate` | `16000` | Target sample rate for Whisper |
+| `audio.device_name` | `C200` | Mic name substring to search for |
