@@ -14,6 +14,7 @@ import logging
 import logging.handlers
 import os
 import re
+import subprocess
 import threading
 import time
 import tomllib
@@ -76,8 +77,11 @@ MODEL = _get("whisper", "model")
 WHISPER_RATE = _get("whisper", "sample_rate")
 DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 
+# --- Paths ---
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(_SCRIPT_DIR, "mumble.log")
+
 # --- Logging ---
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mumble.log")
 log = logging.getLogger("mumble")
 log.setLevel(logging.INFO)
 handler = logging.handlers.RotatingFileHandler(
@@ -138,8 +142,14 @@ def update_tray(is_recording):
 
 def open_log(icon, item):
     """Open the log file in VS Code."""
-    import subprocess
     subprocess.Popen(f'code "{LOG_FILE}"', shell=True)
+
+
+def show_help():
+    """Open the README on GitHub in the default browser."""
+    import webbrowser
+    log.info("Voice command: show help")
+    webbrowser.open("https://github.com/thompler/mumble#readme")
 
 
 def quit_from_tray(icon, item):
@@ -250,6 +260,11 @@ def stop_recording_and_transcribe():
     text = re.sub(r' {2,}', ' ', text)
 
     log.info(f"Transcribed: {text}")
+
+    # Voice commands
+    if text.strip("., ").lower() == "show help":
+        show_help()
+        return
 
     global last_transcription
     last_transcription = text
