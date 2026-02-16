@@ -13,6 +13,7 @@ Logs to mumble.log in the same directory.
 import logging
 import logging.handlers
 import os
+import re
 import threading
 import time
 import winsound
@@ -204,6 +205,9 @@ def stop_recording_and_transcribe():
     if not text:
         log.info("Empty transcription")
         return
+
+    # Collapse spaces between individual digits: "1 2 3 4" → "1234"
+    text = re.sub(r'(?<=\d) (?=\d)', '', text)
 
     log.info(f"Transcribed: {text}")
 
