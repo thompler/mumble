@@ -1,5 +1,0 @@
-RealtimeSTT
-keyboard
-pynput
-pystray
-Pillow

@@ -7,7 +7,7 @@ Ctrl+Alt+V      — re-paste last transcription
 Ctrl+Alt+Q      — quit
 
 Runs silently in the background (no console window needed).
-Logs to mumble.log in the same directory.
+Logs to mumble.log (in ~/.mumble/ when installed, or same directory in dev mode).
 """
 
 import logging
@@ -32,9 +32,38 @@ from pynput.keyboard import Controller as KBController, Key
 
 import pystray
 
-# --- Config ---
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mumble.toml")
+# --- Paths ---
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_USER_DIR = os.path.join(os.path.expanduser("~"), ".mumble")
 
+
+def _is_dev_mode():
+    """True when running from a source checkout (mumble.toml sits next to the script)."""
+    return os.path.isfile(os.path.join(_SCRIPT_DIR, "mumble.toml"))
+
+
+def _find_config():
+    """Return the path to mumble.toml, or None if not found."""
+    # 1. User config dir (~/.mumble/)
+    user_cfg = os.path.join(_USER_DIR, "mumble.toml")
+    if os.path.isfile(user_cfg):
+        return user_cfg
+    # 2. Same directory as the script (dev / clone mode)
+    script_cfg = os.path.join(_SCRIPT_DIR, "mumble.toml")
+    if os.path.isfile(script_cfg):
+        return script_cfg
+    return None
+
+
+def _log_dir():
+    """Return the directory for mumble.log."""
+    if _is_dev_mode():
+        return _SCRIPT_DIR
+    os.makedirs(_USER_DIR, exist_ok=True)
+    return _USER_DIR
+
+
+# --- Config ---
 _DEFAULTS = {
     "hotkeys": {
         "record": "ctrl+alt+space",
@@ -53,13 +82,13 @@ _DEFAULTS = {
 
 def _load_config():
     """Load config from mumble.toml, falling back to defaults if missing."""
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "rb") as f:
+    config_path = _find_config()
+    if config_path:
+        with open(config_path, "rb") as f:
             cfg = tomllib.load(f)
+        logging.getLogger("mumble").info(f"Config loaded from {config_path}")
     else:
-        logging.getLogger("mumble").warning(
-            f"Config file not found ({CONFIG_PATH}), using defaults"
-        )
+        logging.getLogger("mumble").warning("No mumble.toml found, using defaults")
         cfg = {}
 
     def _get(section, key):
@@ -77,9 +106,7 @@ MODEL = _get("whisper", "model")
 WHISPER_RATE = _get("whisper", "sample_rate")
 DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 
-# --- Paths ---
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(_SCRIPT_DIR, "mumble.log")
+LOG_FILE = os.path.join(_log_dir(), "mumble.log")
 
 # --- Logging ---
 log = logging.getLogger("mumble")

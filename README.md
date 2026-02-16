@@ -29,39 +29,47 @@ Before pasting, Mumble cleans up the transcription:
 ## Requirements
 
 - Windows (uses `winsound` for audio feedback and `pystray` for the system tray)
-- Python 3.10+
+- Python 3.11+
 
-## Setup
+## Installation
+
+Install directly from GitHub:
 
 ```
-pip install faster-whisper keyboard pynput pystray Pillow numpy sounddevice scipy pyperclip
+pip install git+https://github.com/thompler/mumble.git
+```
+
+Or install from a local clone:
+
+```
+git clone https://github.com/thompler/mumble.git
+cd mumble
+pip install .
 ```
 
 The first run will download the Whisper model (~500 MB).
 
 ### Microphone
 
-By default, Mumble looks for an **Anker C200** mic by name. If not found, it falls back to the system default input device. To change the target mic, edit `device_name` in `mumble.toml`.
+By default, Mumble looks for an **Anker C200** mic by name. If not found, it falls back to the system default input device. To change the target mic, edit `device_name` in your config file (see [Configuration](#configuration)).
 
 ## Running
 
-### Foreground
+### Console (with log output)
 
 ```
-python mumble.py
+mumble
 ```
 
 ### Background (no console window)
 
-Double-click `mumble.vbs`, which launches Mumble via `pythonw.exe` with no visible window.
+```
+mumble-gui
+```
 
 ### Start on login
 
-Place a shortcut to `mumble.vbs` in your Startup folder:
-
-```
-shell:startup
-```
+Create a shortcut to `mumble-gui` in your Startup folder (`shell:startup`).
 
 ## System tray
 
@@ -78,11 +86,17 @@ Right-click the icon for options:
 
 ## Logging
 
-Logs are written to `mumble.log` in the same directory as `mumble.py`. The log rotates at 1 MB with one backup file.
+Logs are written to `mumble.log`. When installed via pip, logs go to `~/.mumble/mumble.log`. When running from a source checkout (where `mumble.toml` sits next to `mumble.py`), logs go to that same directory. The log rotates at 1 MB with one backup file.
 
 ## Configuration
 
-Settings live in `mumble.toml` (same directory as `mumble.py`). If the file is missing, Mumble falls back to built-in defaults.
+Settings live in `mumble.toml`. Mumble checks for config in this order:
+
+1. `~/.mumble/mumble.toml` (user config — recommended for pip installs)
+2. Same directory as `mumble.py` (dev / source checkout mode)
+3. Built-in defaults
+
+To customize, create `~/.mumble/mumble.toml`:
 
 ```toml
 [hotkeys]

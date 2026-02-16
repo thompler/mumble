@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mumble"
+version = "0.1.0"
+description = "Hotkey-activated speech-to-text that pastes into the active window"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "faster-whisper",
+    "keyboard",
+    "pynput",
+    "pystray",
+    "Pillow",
+    "numpy",
+    "sounddevice",
+    "scipy",
+    "pyperclip",
+]
+
+[project.urls]
+Homepage = "https://github.com/thompler/mumble"
+
+[project.scripts]
+mumble = "mumble:main"
+
+[project.gui-scripts]
+mumble-gui = "mumble:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["mumble.py"]
