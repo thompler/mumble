@@ -69,7 +69,15 @@ mumble-gui
 
 ### Start on login
 
-Create a shortcut to `mumble-gui` in your Startup folder (`shell:startup`).
+```
+mumble --install-startup
+```
+
+This creates a shortcut to `mumble-gui` in your Windows Startup folder. To remove it:
+
+```
+mumble --remove-startup
+```
 
 ## System tray
 

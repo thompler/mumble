@@ -10,11 +10,14 @@ Runs silently in the background (no console window needed).
 Logs to mumble.log (in ~/.mumble/ when installed, or same directory in dev mode).
 """
 
+import argparse
 import logging
 import logging.handlers
 import os
 import re
+import shutil
 import subprocess
+import sys
 import threading
 import time
 import tomllib
@@ -366,7 +369,50 @@ def quit_app():
     shutdown_event.set()
 
 
+_STARTUP_DIR = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs\Startup")
+_SHORTCUT_NAME = "Mumble.lnk"
+
+
+def _install_startup():
+    """Create a Start Menu shortcut so Mumble launches on login."""
+    target = shutil.which("mumble-gui")
+    if target is None:
+        print("Error: mumble-gui not found on PATH. Is Mumble installed via pip?")
+        sys.exit(1)
+    shortcut_path = os.path.join(_STARTUP_DIR, _SHORTCUT_NAME)
+    ps_script = (
+        f'$ws = New-Object -ComObject WScript.Shell; '
+        f'$s = $ws.CreateShortcut("{shortcut_path}"); '
+        f'$s.TargetPath = "{target}"; '
+        f'$s.Save()'
+    )
+    subprocess.run(["powershell", "-Command", ps_script], check=True)
+    print(f"Startup shortcut created: {shortcut_path}")
+
+
+def _remove_startup():
+    """Remove the Mumble startup shortcut."""
+    shortcut_path = os.path.join(_STARTUP_DIR, _SHORTCUT_NAME)
+    if os.path.exists(shortcut_path):
+        os.remove(shortcut_path)
+        print(f"Startup shortcut removed: {shortcut_path}")
+    else:
+        print("No startup shortcut found.")
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Mumble — hotkey-activated speech-to-text")
+    parser.add_argument("--install-startup", action="store_true", help="Add Mumble to Windows startup")
+    parser.add_argument("--remove-startup", action="store_true", help="Remove Mumble from Windows startup")
+    args = parser.parse_args()
+
+    if args.install_startup:
+        _install_startup()
+        return
+    if args.remove_startup:
+        _remove_startup()
+        return
+
     global model, device_index, record_rate
 
     log.info("=" * 40)
