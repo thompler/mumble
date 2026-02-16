@@ -82,6 +82,9 @@ _DEFAULTS = {
         "device_name": "C200",
         "max_duration": 90,
     },
+    "commands": {
+        "trigger": "claude",
+    },
 }
 
 def _load_config():
@@ -110,8 +113,19 @@ MODEL = _get("whisper", "model")
 WHISPER_RATE = _get("whisper", "sample_rate")
 DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 MAX_DURATION = _get("audio", "max_duration")
+COMMAND_TRIGGER = _get("commands", "trigger")
 
 LOG_FILE = os.path.join(_log_dir(), "mumble.log")
+
+# --- Slash command trigger aliases ---
+_CLAUDE_ALIASES = {"clod", "clawed", "cloud", "claud", "clogged", "klaud", "klaude"}
+
+def _trigger_variants(trigger):
+    """Return a set of lowercase strings that should match the trigger word."""
+    variants = {trigger.lower()}
+    if trigger.lower() == "claude":
+        variants |= _CLAUDE_ALIASES
+    return variants
 
 # --- Logging ---
 log = logging.getLogger("mumble")
@@ -291,6 +305,15 @@ def stop_recording_and_transcribe():
 
     # Collapse runs of multiple spaces into one
     text = re.sub(r' {2,}', ' ', text)
+
+    # Slash commands: "claude clear" → "/clear"
+    trigger_variants = _trigger_variants(COMMAND_TRIGGER)
+    pattern = r'(?i)^(?:' + '|'.join(re.escape(v) for v in trigger_variants) + r')\s+(\S+)$'
+    cmd_match = re.match(pattern, text.strip("., "))
+    if cmd_match:
+        command = cmd_match.group(1).lower()
+        text = f"/{command}"
+        log.info(f"Voice command: {text}")
 
     log.info(f"Transcribed: {text}")
 
