@@ -11,11 +11,14 @@ Mumble — hotkey-activated speech-to-text for Windows. Single-file Python app (
 ```bash
 pip install .                  # install from local clone
 pip install git+https://github.com/thompler/mumble.git  # install from GitHub
-mumble                         # run (console)
-mumble-gui                     # run (no console window)
+mumble                         # run (console, installed)
+mumble-gui                     # run (no console window, installed)
+python mumble.py               # run directly from repo (dev mode)
 ```
 
-Build system is hatchling (configured in `pyproject.toml`). No tests or linting are configured.
+> **Note for Claude Code:** The `mumble` and `mumble-gui` commands are not on the bash PATH. To start mumble from within this repo, use `python mumble.py`.
+
+Build system is hatchling (configured in `pyproject.toml`). Tests live in `tests/` and run via `python -m pytest`. Linting is not configured.
 
 ## Architecture
 
@@ -24,13 +27,14 @@ Everything lives in `mumble.py` (~400 lines). Key flow:
 1. **Config** — `_find_config()` searches `~/.mumble/mumble.toml` then script-dir then falls back to `_DEFAULTS` dict. Dev mode (mumble.toml next to script) keeps logs local; installed mode uses `~/.mumble/`.
 2. **Audio** — `sounddevice.InputStream` records to `audio_chunks` list. Targets Anker C200 mic by name substring, falls back to system default.
 3. **Transcription** — `faster_whisper.WhisperModel` (small.en, CPU, int8). Audio is resampled to 16kHz via `scipy.signal.resample_poly` if needed.
-4. **Post-processing** — Digit collapse (`1 2 3 4` → `1234`), double-space collapse. Applied in `stop_recording_and_transcribe()`.
+4. **Post-processing** — Digit collapse (`1 2 3 4` → `1234`), double-space collapse. Voice commands: the trigger word (`claude`, plus homophone aliases) + one word becomes a slash command (`/clear`); "show help" opens the README. Applied in `stop_recording_and_transcribe()`.
 5. **Paste** — Copies to clipboard via `pyperclip`, then simulates Ctrl+V via `pynput`.
 6. **Tray** — `pystray` icon (green=idle, red=recording) with hotkey info and quit menu.
 
-Hotkeys are registered globally via the `keyboard` module. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit.
+Hotkeys are registered globally via the `keyboard` module. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit. A recording auto-cancels after `audio.max_duration` seconds (default 90) via a `threading.Timer`. A `transcribing` flag guards against starting a new recording while a transcription is still in flight; `decide_toggle_action()` encodes the start/stop/ignore state machine.
 
 ## Key decisions
 
 - Spoken punctuation replacement was tried and removed — Whisper inserts commas around spoken words like "period", producing ugly output like `,:,`.
 - Windows-only: uses `winsound` for beeps, `pystray` for tray, `keyboard` for global hotkeys.
+- Concurrency: `recording`, `transcribing`, and `audio_chunks` are module globals shared across the hotkey, audio-callback, transcription, and timeout threads. Rather than locking, the `transcribing` flag makes the record hotkey a no-op while a transcription runs, preventing a new recording from clearing `audio_chunks` mid-transcription.
