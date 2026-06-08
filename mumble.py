@@ -66,6 +66,18 @@ def _log_dir():
     return _USER_DIR
 
 
+# --- Logging ---
+LOG_FILE = os.path.join(_log_dir(), "mumble.log")
+
+log = logging.getLogger("mumble")
+log.setLevel(logging.INFO)
+handler = logging.handlers.RotatingFileHandler(
+    LOG_FILE, maxBytes=1_000_000, backupCount=1,
+)
+handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+log.addHandler(handler)
+
+
 # --- Config ---
 _DEFAULTS = {
     "hotkeys": {
@@ -115,8 +127,6 @@ DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 MAX_DURATION = _get("audio", "max_duration")
 COMMAND_TRIGGER = _get("commands", "trigger")
 
-LOG_FILE = os.path.join(_log_dir(), "mumble.log")
-
 # --- Slash command trigger aliases ---
 _CLAUDE_ALIASES = {"clod", "clawed", "cloud", "claud", "clogged", "klaud", "klaude"}
 
@@ -126,15 +136,6 @@ def _trigger_variants(trigger):
     if trigger.lower() == "claude":
         variants |= _CLAUDE_ALIASES
     return variants
-
-# --- Logging ---
-log = logging.getLogger("mumble")
-log.setLevel(logging.INFO)
-handler = logging.handlers.RotatingFileHandler(
-    LOG_FILE, maxBytes=1_000_000, backupCount=1,
-)
-handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-log.addHandler(handler)
 
 # --- Globals ---
 recording = False
