@@ -15,7 +15,7 @@ Runs silently in the system tray with no console window.
 
 ## How it works
 
-1. **Record** — Audio is captured from your microphone when you press the hotkey. The tray icon turns red while recording.
+1. **Record** — Audio is captured from your microphone when you press the hotkey. The tray icon turns red while recording. A recording automatically cancels after `max_duration` seconds (default 90) so a forgotten recording can't run forever.
 2. **Transcribe** — When you press the hotkey again, the audio is resampled to 16 kHz and fed to [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small.en` model, CPU, int8).
 3. **Paste** — The transcribed text is copied to your clipboard and pasted into the active window via `Ctrl+V`.
 
@@ -25,6 +25,13 @@ Before pasting, Mumble cleans up the transcription:
 
 - **Digit collapse** — Spaces between individual digits are removed (`1 2 3 4` becomes `1234`), useful for phone numbers, zip codes, etc.
 - **Double-space collapse** — Runs of multiple spaces are reduced to a single space.
+
+## Voice commands
+
+Some spoken phrases are interpreted as commands instead of being pasted as text:
+
+- **Slash commands** — Say the trigger word (`claude` by default) followed by a single word, and Mumble pastes a slash command instead of the literal words. For example, saying "claude clear" pastes `/clear`. Common mishearings of "claude" (clod, clawed, cloud, claud, clogged, klaud, klaude) are also accepted. Change the trigger word with `commands.trigger` in your config.
+- **show help** — Saying "show help" opens this README on GitHub instead of pasting anything.
 
 ## Requirements
 
@@ -119,6 +126,10 @@ sample_rate = 16000
 
 [audio]
 device_name = "C200"
+max_duration = 90
+
+[commands]
+trigger = "claude"
 ```
 
 | Key | Default | Description |
@@ -130,3 +141,5 @@ device_name = "C200"
 | `whisper.model` | `small.en` | Whisper model size |
 | `whisper.sample_rate` | `16000` | Target sample rate for Whisper |
 | `audio.device_name` | `C200` | Mic name substring to search for |
+| `audio.max_duration` | `90` | Auto-cancel a recording after this many seconds |
+| `commands.trigger` | `claude` | Spoken word that prefixes a voice slash command |
