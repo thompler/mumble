@@ -139,6 +139,7 @@ def _trigger_variants(trigger):
 
 # --- Globals ---
 recording = False
+transcribing = False
 audio_chunks = []
 last_transcription = None
 kb = KBController()
@@ -250,7 +251,7 @@ def audio_callback(indata, frames, time_info, status):
 
 
 def start_recording():
-    """Open the mic stream via sounddevice."""
+    """Open the mic stream via sounddevice. Returns True on success, False on failure."""
     global audio_chunks, input_stream
     audio_chunks = []
 
@@ -264,68 +265,79 @@ def start_recording():
     if device_index is not None:
         kwargs["device"] = device_index
 
-    input_stream = sd.InputStream(**kwargs)
-    input_stream.start()
+    try:
+        input_stream = sd.InputStream(**kwargs)
+        input_stream.start()
+    except Exception:
+        log.exception("Failed to start audio stream")
+        input_stream = None
+        return False
     log.info(f"Recording started ({record_rate} Hz)")
+    return True
 
 
 def stop_recording_and_transcribe():
     """Stop the mic stream, transcribe collected audio, paste the result."""
-    global input_stream
+    global input_stream, last_transcription, transcribing
 
-    if input_stream:
-        input_stream.stop()
-        input_stream.close()
-        input_stream = None
+    try:
+        if input_stream:
+            input_stream.stop()
+            input_stream.close()
+            input_stream = None
 
-    update_tray(False)
+        update_tray(False)
 
-    if not audio_chunks:
-        log.info("No audio captured")
-        return
+        if not audio_chunks:
+            log.info("No audio captured")
+            return
 
-    audio_np = np.concatenate(audio_chunks, axis=0).flatten()
-    duration = len(audio_np) / record_rate
-    log.info(f"Audio: {duration:.1f}s ({len(audio_chunks)} chunks)")
+        audio_np = np.concatenate(audio_chunks, axis=0).flatten()
+        duration = len(audio_np) / record_rate
+        log.info(f"Audio: {duration:.1f}s ({len(audio_chunks)} chunks)")
 
-    # Resample to 16kHz if needed
-    if record_rate != WHISPER_RATE:
-        g = gcd(record_rate, WHISPER_RATE)
-        audio_np = resample_poly(audio_np, up=WHISPER_RATE // g, down=record_rate // g)
+        # Resample to 16kHz if needed
+        if record_rate != WHISPER_RATE:
+            g = gcd(record_rate, WHISPER_RATE)
+            audio_np = resample_poly(audio_np, up=WHISPER_RATE // g, down=record_rate // g)
 
-    log.info("Transcribing...")
-    segments, _info = model.transcribe(audio_np, language="en", beam_size=5)
-    text = " ".join(seg.text for seg in segments).strip()
+        log.info("Transcribing...")
+        segments, _info = model.transcribe(audio_np, language="en", beam_size=5)
+        text = " ".join(seg.text for seg in segments).strip()
 
-    if not text:
-        log.info("Empty transcription")
-        return
+        if not text:
+            log.info("Empty transcription")
+            return
 
-    # Collapse spaces between individual digits: "1 2 3 4" → "1234"
-    text = re.sub(r'(?<=\d) (?=\d)', '', text)
+        # Collapse spaces between individual digits: "1 2 3 4" → "1234"
+        text = re.sub(r'(?<=\d) (?=\d)', '', text)
 
-    # Collapse runs of multiple spaces into one
-    text = re.sub(r' {2,}', ' ', text)
+        # Collapse runs of multiple spaces into one
+        text = re.sub(r' {2,}', ' ', text)
 
-    # Slash commands: "claude clear" → "/clear"
-    trigger_variants = _trigger_variants(COMMAND_TRIGGER)
-    pattern = r'(?i)^(?:' + '|'.join(re.escape(v) for v in trigger_variants) + r')\s+(\S+)$'
-    cmd_match = re.match(pattern, text.strip("., "))
-    if cmd_match:
-        command = cmd_match.group(1).lower()
-        text = f"/{command}"
-        log.info(f"Voice command: {text}")
+        # Slash commands: "claude clear" → "/clear"
+        trigger_variants = _trigger_variants(COMMAND_TRIGGER)
+        pattern = r'(?i)^(?:' + '|'.join(re.escape(v) for v in trigger_variants) + r')\s+(\S+)$'
+        cmd_match = re.match(pattern, text.strip("., "))
+        if cmd_match:
+            command = cmd_match.group(1).lower()
+            text = f"/{command}"
+            log.info(f"Voice command: {text}")
 
-    log.info(f"Transcribed: {text}")
+        log.info(f"Transcribed: {text}")
 
-    # Voice commands
-    if text.strip("., ").lower() == "show help":
-        show_help()
-        return
+        # Voice commands
+        if text.strip("., ").lower() == "show help":
+            show_help()
+            return
 
-    global last_transcription
-    last_transcription = text
-    paste_text(text)
+        last_transcription = text
+        paste_text(text)
+    except Exception:
+        log.exception("Transcription failed")
+        winsound.Beep(300, 200)
+    finally:
+        transcribing = False
 
 
 def paste_text(text):
@@ -382,24 +394,50 @@ def _timeout_cancel():
     cancel_recording()
 
 
+def decide_toggle_action(recording, transcribing):
+    """Decide what a record-hotkey press should do given current state.
+
+    Returns "ignore" while a transcription is still running (pressing record
+    then would clear audio_chunks out from under it), "stop" if currently
+    recording, else "start".
+    """
+    if transcribing:
+        return "ignore"
+    if recording:
+        return "stop"
+    return "start"
+
+
 def toggle_recording():
     """Toggle recording on/off on hotkey press."""
-    global recording, recording_timer
+    global recording, recording_timer, transcribing
 
-    if not recording:
+    action = decide_toggle_action(recording, transcribing)
+
+    if action == "ignore":
+        log.info("Record hotkey ignored — transcription in progress")
+        winsound.Beep(300, 200)
+        return
+
+    if action == "start":
         recording = True
+        if not start_recording():
+            recording = False
+            update_tray(False)
+            winsound.Beep(300, 200)
+            return
         log.info("Recording...")
         winsound.Beep(1000, 150)
         update_tray(True)
-        start_recording()
         recording_timer = threading.Timer(MAX_DURATION, _timeout_cancel)
         recording_timer.daemon = True
         recording_timer.start()
-    else:
+    else:  # "stop"
         if recording_timer is not None:
             recording_timer.cancel()
             recording_timer = None
         recording = False
+        transcribing = True
         log.info("Stopped, transcribing...")
         winsound.Beep(500, 150)
         threading.Thread(target=stop_recording_and_transcribe, daemon=True).start()
