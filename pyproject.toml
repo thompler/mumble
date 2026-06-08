@@ -21,6 +21,9 @@ dependencies = [
     "pyperclip",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [project.urls]
 Homepage = "https://github.com/thompler/mumble"
 
@@ -33,3 +36,6 @@ mumble-gui = "mumble:main"
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 only-include = ["mumble.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
