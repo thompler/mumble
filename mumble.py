@@ -1,7 +1,7 @@
 """
 Mumble — Hotkey-activated speech-to-text that pastes into the active window.
 
-Ctrl+Alt+Space  — start/stop recording
+Ctrl+Alt+Space  — hold to record, release to stop (tap to toggle; see hotkeys.record_mode)
 Ctrl+Alt+X      — cancel recording
 Ctrl+Alt+V      — re-paste last transcription
 Ctrl+Alt+Q      — quit

@@ -8,15 +8,15 @@ Runs silently in the system tray with no console window.
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Alt+Space` | Start / stop recording |
+| `Ctrl+Alt+Space` | Hold to record, release to stop. A quick tap starts a recording that the next press stops. |
 | `Ctrl+Alt+X` | Cancel recording (discard audio) |
 | `Ctrl+Alt+V` | Re-paste last transcription |
 | `Ctrl+Alt+Q` | Quit |
 
 ## How it works
 
-1. **Record** — Audio is captured from your microphone when you press the hotkey. The tray icon turns red while recording. A recording automatically cancels after `max_duration` seconds (default 90) so a forgotten recording can't run forever.
-2. **Transcribe** — When you press the hotkey again, the audio is resampled to 16 kHz and fed to [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small.en` model, CPU, int8).
+1. **Record** — Audio is captured from your microphone while you hold the hotkey, and stops when you release it. A press shorter than 0.3 s is a tap instead: recording keeps running until the next press. Set `record_mode = "toggle"` to make every press a start/stop toggle. While a run-as-administrator window is in the foreground, Mumble cannot see key releases there, so a press in that window behaves like a tap. The tray icon turns red while recording. A recording automatically cancels after `max_duration` seconds (default 90) so a forgotten recording can't run forever.
+2. **Transcribe** — When recording stops, the audio is resampled to 16 kHz and fed to [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small.en` model, CPU, int8).
 3. **Paste** — The transcribed text is copied to your clipboard and pasted into the active window via `Ctrl+V`.
 
 ### Post-processing
@@ -116,6 +116,7 @@ To customize, create `~/.mumble/mumble.toml`:
 ```toml
 [hotkeys]
 record = "ctrl+alt+space"
+record_mode = "hold"
 cancel = "ctrl+alt+x"
 quit = "ctrl+alt+q"
 repaste = "ctrl+alt+v"
@@ -134,7 +135,8 @@ trigger = "claude"
 
 | Key | Default | Description |
 |---|---|---|
-| `hotkeys.record` | `ctrl+alt+space` | Toggle recording |
+| `hotkeys.record` | `ctrl+alt+space` | Record hotkey |
+| `hotkeys.record_mode` | `hold` | `hold`: record while held, tap to toggle. `toggle`: press to start, press to stop |
 | `hotkeys.cancel` | `ctrl+alt+x` | Cancel recording |
 | `hotkeys.quit` | `ctrl+alt+q` | Quit |
 | `hotkeys.repaste` | `ctrl+alt+v` | Re-paste last result |
