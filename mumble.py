@@ -13,6 +13,7 @@ Logs to mumble.log (in ~/.mumble/ when installed, or same directory in dev mode)
 import argparse
 import ctypes
 import ctypes.wintypes as wintypes
+import itertools
 import logging
 import logging.handlers
 import os
@@ -213,6 +214,10 @@ _user32.VkKeyScanW.restype = ctypes.c_short
 
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
+WM_APP = 0x8000
+WM_SHIELD_PUSH = WM_APP + 1     # posted to the hotkey thread: register the shield combos
+WM_SHIELD_POP = WM_APP + 2      # posted to the hotkey thread: unregister them
+SHIELD_ID_BASE = 100            # hotkey ids below this are the four real bindings
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
 
 _MOD_FLAGS = {
@@ -278,6 +283,27 @@ def _is_vk_held(vk):
     return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
 
 
+def _shield_hotkeys(hotkey):
+    """Combos to capture while a recording runs so the main key cannot leak.
+
+    RegisterHotKey consumes a keystroke only when it matches a registered
+    combo. Holding ctrl+alt+space auto-repeats Space; once Ctrl or Alt is
+    released those repeats match nothing and land in the foreground app as a
+    run of spaces. Registering the main key with every smaller modifier subset
+    ("space", "ctrl+space", "alt+space") for the duration of the recording
+    makes Mumble swallow them instead. Chords with no main key get nothing.
+    """
+    _flags, vk = _parse_hotkey(hotkey)
+    if vk is None:
+        return []
+    *modifiers, key = [p.strip().lower() for p in hotkey.split("+")]
+    return [
+        "+".join(subset + (key,))
+        for r in range(len(modifiers))
+        for subset in itertools.combinations(modifiers, r)
+    ]
+
+
 def _is_key_held(name):
     """True if any physical key for the modifier `name` is currently down (live OS state)."""
     return any(_is_vk_held(vk) for vk in _MODIFIER_VKS.get(name, ()))
@@ -307,6 +333,19 @@ class HotkeyManager:
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._error = None
+        self._shield = []          # [(hotkey_str, (flags, vk))] requested by push_shield
+        self._shield_ids = []      # ids currently registered on the loop thread
+
+    def push_shield(self, hotkeys):
+        """Ask the loop thread to register `hotkeys` as swallowed combos (see _shield_hotkeys)."""
+        self._shield = [(hk, _parse_hotkey(hk)) for hk in hotkeys]
+        if self.thread_id is not None:
+            _user32.PostThreadMessageW(self.thread_id, WM_SHIELD_PUSH, 0, 0)
+
+    def pop_shield(self):
+        """Ask the loop thread to unregister the shield combos. No-op if none are active."""
+        if self.thread_id is not None:
+            _user32.PostThreadMessageW(self.thread_id, WM_SHIELD_POP, 0, 0)
 
     def register(self, hotkey, callback):
         """Queue a hotkey for registration. Parses eagerly so bad strings fail before start()."""
@@ -384,7 +423,27 @@ class HotkeyManager:
                         callback()
                     except Exception:
                         log.exception(f"Hotkey handler for {hotkey!r} failed")
+                # ids >= SHIELD_ID_BASE are shield combos: consumed, deliberately ignored
+            elif msg.message == WM_SHIELD_PUSH:
+                self._register_shield()
+            elif msg.message == WM_SHIELD_POP:
+                self._unregister_shield()
+        self._unregister_shield()
         self._unregister(registered)
+
+    def _register_shield(self):
+        # RegisterHotKey/UnregisterHotKey are per-thread, so this runs on the loop thread only.
+        self._unregister_shield()
+        for i, (hotkey, (flags, vk)) in enumerate(self._shield, start=SHIELD_ID_BASE):
+            if _user32.RegisterHotKey(None, i, flags | MOD_NOREPEAT, vk):
+                self._shield_ids.append(i)
+            else:
+                log.warning(f"Shield hotkey {hotkey!r} unavailable: {ctypes.FormatError(ctypes.get_last_error()).strip()}")
+
+    def _unregister_shield(self):
+        for i in self._shield_ids:
+            _user32.UnregisterHotKey(None, i)
+        self._shield_ids = []
 
     def _unregister(self, count):
         for i in range(1, count + 1):
@@ -401,6 +460,8 @@ model = None
 device_index = None
 record_rate = 48000
 record_release_vks = ()
+record_shield_hotkeys = []
+hotkeys = None                  # HotkeyManager, created in _run()
 input_stream = None
 tray_icon = None
 shutdown_event = threading.Event()
@@ -597,6 +658,8 @@ def stop_recording_and_transcribe():
         winsound.Beep(300, 200)
     finally:
         transcribing = False
+        if hotkeys is not None:
+            hotkeys.pop_shield()
 
 
 def _wait_for_modifier_release(modifiers, timeout=2.0):
@@ -658,6 +721,8 @@ def cancel_recording():
         recording_timer = None
     stop_stream()
     audio_chunks = []
+    if hotkeys is not None:
+        hotkeys.pop_shield()
     update_tray(False)
     log.info("Recording cancelled")
     winsound.Beep(300, 200)
@@ -755,6 +820,8 @@ def toggle_recording():
         recording_timer = threading.Timer(MAX_DURATION, _timeout_cancel)
         recording_timer.daemon = True
         recording_timer.start()
+        if hotkeys is not None and record_shield_hotkeys:
+            hotkeys.push_shield(record_shield_hotkeys)
         if RECORD_MODE == "hold":
             threading.Thread(target=_watch_release, args=(now, record_release_vks), daemon=True).start()
     else:  # "stop"
@@ -831,7 +898,7 @@ def main():
 
 def _run():
     """Initialise audio, model, tray and hotkeys, then block until quit."""
-    global model, device_index, record_rate, RECORD_MODE, record_release_vks
+    global model, device_index, record_rate, RECORD_MODE, record_release_vks, record_shield_hotkeys, hotkeys
 
     RECORD_MODE = _validate_record_mode(RECORD_MODE)
 
@@ -852,6 +919,7 @@ def _run():
 
     # Register hotkeys
     record_release_vks = _release_vks(HOTKEY)
+    record_shield_hotkeys = _shield_hotkeys(HOTKEY)
     hotkeys = HotkeyManager()
     hotkeys.register(HOTKEY, toggle_recording)
     hotkeys.register(CANCEL_HOTKEY, cancel_recording)

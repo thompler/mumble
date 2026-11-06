@@ -406,3 +406,73 @@ def test_hold_tap_survives_slow_startup(monkeypatch):
     mumble.toggle_recording()
     _settle()
     assert mumble.recording is True
+
+
+# --- Shield hotkeys: stop the main key's auto-repeat leaking after a modifier is released ---
+
+def test_shield_hotkeys_are_main_key_with_every_smaller_modifier_subset():
+    assert mumble._shield_hotkeys("ctrl+alt+space") == ["space", "ctrl+space", "alt+space"]
+    assert mumble._shield_hotkeys("shift+f8") == ["f8"]
+    assert mumble._shield_hotkeys("f9") == []
+    assert mumble._shield_hotkeys("ctrl+alt+win") == []     # chord: no registrable main key
+
+
+def _f24_is_free():
+    """Probe from this thread whether anyone owns a bare F24 hotkey."""
+    u = ctypes.WinDLL("user32", use_last_error=True)
+    ok = u.RegisterHotKey(None, 999, 0x4000, VK_F24)
+    if ok:
+        u.UnregisterHotKey(None, 999)
+    return bool(ok)
+
+
+def test_hotkey_manager_shield_is_owned_only_while_pushed():
+    mgr = mumble.HotkeyManager()
+    mgr.register("ctrl+alt+shift+f24", lambda: None)
+    mgr.start()
+    try:
+        assert _f24_is_free()
+        mgr.push_shield(["f24", "shift+f24"])
+        # Wait on the manager's own state before probing: a probe that lands first would
+        # itself own F24 for an instant and make the manager's registration fail.
+        assert _wait_until(lambda: len(mgr._shield_ids) == 2), "shield combos were not registered"
+        assert not _f24_is_free(), "shield did not take ownership of F24"
+        mgr.pop_shield()
+        assert _wait_until(lambda: not mgr._shield_ids), "shield was not released"
+        assert _f24_is_free()
+        mgr.pop_shield()                                      # second pop is a harmless no-op
+        assert _wait_until(lambda: not mgr._shield_ids)
+        assert _f24_is_free()
+    finally:
+        mgr.stop()
+
+
+class _FakeHotkeys:
+    def __init__(self):
+        self.calls = []
+    def push_shield(self, hotkeys):
+        self.calls.append(("push", list(hotkeys)))
+    def pop_shield(self):
+        self.calls.append(("pop",))
+
+
+def test_recording_start_pushes_shield_and_cancel_pops_it(monkeypatch):
+    _quiet_toggle_env(monkeypatch, mode="hold", held={VK_SPACE})
+    fake = _FakeHotkeys()
+    monkeypatch.setattr(mumble, "hotkeys", fake)
+    monkeypatch.setattr(mumble, "record_shield_hotkeys", ["space", "ctrl+space", "alt+space"])
+    monkeypatch.setattr(mumble, "stop_stream", lambda: setattr(mumble, "recording", False))
+    mumble.toggle_recording()
+    assert fake.calls == [("push", ["space", "ctrl+space", "alt+space"])]
+    mumble.cancel_recording()
+    assert fake.calls[-1] == ("pop",)
+
+
+def test_transcription_end_pops_shield(monkeypatch):
+    fake = _FakeHotkeys()
+    monkeypatch.setattr(mumble, "hotkeys", fake)
+    monkeypatch.setattr(mumble, "input_stream", None)
+    monkeypatch.setattr(mumble, "audio_chunks", [])
+    monkeypatch.setattr(mumble, "update_tray", lambda s: None)
+    mumble.stop_recording_and_transcribe()      # "No audio captured" path still ends with the pop
+    assert fake.calls == [("pop",)]
