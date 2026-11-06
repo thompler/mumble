@@ -1,6 +1,14 @@
 """Tests for mumble's pure decision logic and error-path state resets."""
 
+import ctypes
+import threading
+import time
+
+import pytest
+
 import mumble
+
+VK_LWIN, VK_SPACE, VK_F8, VK_F24 = 0x5B, 0x20, 0x77, 0x87
 
 
 def test_decide_toggle_action_idle_starts():
@@ -108,21 +116,31 @@ def test_dev_mode_is_detected_by_pyproject_not_config(monkeypatch, tmp_path):
     assert mumble._is_dev_mode() is True
 
 
-def _quiet_toggle_env(monkeypatch):
-    """Stub out audio, tray, beeps, and timers so toggle_recording() can run in a test."""
+def _quiet_toggle_env(monkeypatch, mode="toggle", held=None):
+    """Stub audio, tray, beeps, timers and transcription so toggle_recording() can run in a test.
+
+    `held` is a set of virtual-key codes the fake GetAsyncKeyState reports as down.
+    """
     class FakeTimer:
         def __init__(self, *a, **k): pass
         def start(self): pass
         def cancel(self): pass
+    held = set() if held is None else held
     monkeypatch.setattr(mumble.threading, "Timer", FakeTimer)
     monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: None)
     monkeypatch.setattr(mumble, "start_recording", lambda: True)
     monkeypatch.setattr(mumble, "update_tray", lambda s: None)
-    monkeypatch.setattr(mumble.threading, "Thread", lambda **k: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(mumble, "stop_recording_and_transcribe", lambda: setattr(mumble, "transcribing", False))
+    monkeypatch.setattr(mumble._user32, "GetAsyncKeyState", lambda vk: 0x8000 if vk in held else 0)
+    monkeypatch.setattr(mumble, "RECORD_MODE", mode)
+    monkeypatch.setattr(mumble, "record_release_vks", (VK_SPACE,))
+    monkeypatch.setattr(mumble, "HOLD_TAP_SECONDS", 0.05)
+    monkeypatch.setattr(mumble, "RELEASE_POLL_SECONDS", 0.005)
     monkeypatch.setattr(mumble, "recording", False)
     monkeypatch.setattr(mumble, "transcribing", False)
     monkeypatch.setattr(mumble, "recording_timer", None)
     monkeypatch.setattr(mumble, "_last_record_trigger", 0.0)
+    return held
 
 
 def test_toggle_ignores_auto_repeat_triggers(monkeypatch):
@@ -149,13 +167,6 @@ def test_toggle_accepts_distinct_press_after_release(monkeypatch):
 
 # --- Win32 RegisterHotKey layer ---
 
-import ctypes
-import threading
-import time
-
-import pytest
-
-VK_LWIN, VK_SPACE, VK_F8, VK_F24 = 0x5B, 0x20, 0x77, 0x87
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 1, 2, 4, 8
 WM_HOTKEY = 0x0312
 
@@ -290,3 +301,81 @@ def test_is_vk_held_reads_high_bit(monkeypatch):
     monkeypatch.setattr(mumble._user32, "GetAsyncKeyState", lambda vk: 0x8000 if vk == VK_SPACE else 0x0001)
     assert mumble._is_vk_held(VK_SPACE) is True
     assert mumble._is_vk_held(VK_F8) is False   # low bit (was pressed since last call) must not count
+
+
+# --- Hold-to-record release watcher ---
+
+def _settle():
+    time.sleep(0.05)   # let the watcher thread poll a few times
+
+
+def test_hold_stops_when_main_key_released_after_threshold(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="hold", held={VK_SPACE})
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    clock[0] = 100.5          # held well past HOLD_TAP_SECONDS
+    _settle()
+    assert mumble.recording is True
+    held.clear()              # main key up
+    _settle()
+    assert mumble.recording is False
+
+
+def test_hold_tap_keeps_recording_until_next_press(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="hold", held={VK_SPACE})
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    held.clear()              # released at t=100.0, within the tap window
+    _settle()
+    assert mumble.recording is True
+    clock[0] = 101.0
+    mumble.toggle_recording()
+    assert mumble.recording is False
+
+
+def test_hold_instant_release_is_a_tap(monkeypatch):
+    # GetAsyncKeyState reports nothing while an elevated window is focused.
+    _quiet_toggle_env(monkeypatch, mode="hold", held=set())
+    mumble.toggle_recording()
+    _settle()
+    assert mumble.recording is True
+
+
+def test_hold_only_main_key_release_counts(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="hold", held={0x11, 0x12, VK_SPACE})
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    clock[0] = 100.5
+    held.discard(0x11); held.discard(0x12)    # modifiers up, space still down
+    _settle()
+    assert mumble.recording is True
+    held.discard(VK_SPACE)
+    _settle()
+    assert mumble.recording is False
+
+
+def test_hold_watcher_does_nothing_after_cancel(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="hold", held={VK_SPACE})
+    monkeypatch.setattr(mumble, "stop_stream", lambda: setattr(mumble, "recording", False))
+    stops = []
+    monkeypatch.setattr(mumble, "_stop_and_transcribe", lambda: stops.append(1))
+    mumble.toggle_recording()
+    mumble.cancel_recording()
+    held.clear()
+    _settle()
+    assert stops == []
+    assert mumble.recording is False
+
+
+def test_toggle_mode_ignores_release(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="toggle", held={VK_SPACE})
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    clock[0] = 100.5
+    held.clear()
+    _settle()
+    assert mumble.recording is True

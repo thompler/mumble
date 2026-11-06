@@ -407,6 +407,8 @@ shutdown_event = threading.Event()
 recording_timer = None
 _last_record_trigger = 0.0
 RECORD_DEBOUNCE_SECONDS = 0.3
+HOLD_TAP_SECONDS = 0.3
+RELEASE_POLL_SECONDS = 0.02
 
 
 # --- Tray icon ---
@@ -681,9 +683,40 @@ def decide_toggle_action(recording, transcribing):
     return "start"
 
 
+def _stop_and_transcribe():
+    """End the current recording and transcribe it. No-op if not recording."""
+    global recording, recording_timer, transcribing
+    if not recording:
+        return
+    if recording_timer is not None:
+        recording_timer.cancel()
+        recording_timer = None
+    recording = False
+    transcribing = True
+    log.info("Stopped, transcribing...")
+    winsound.Beep(500, 150)
+    threading.Thread(target=stop_recording_and_transcribe, daemon=True).start()
+
+
+def _watch_release(press_time, vks):
+    """Hold mode: stop recording when the hotkey's main key is released.
+
+    A release within HOLD_TAP_SECONDS of the press is a tap: recording keeps
+    running until the next press. Does nothing if the recording ended first.
+    """
+    while recording and not shutdown_event.is_set():
+        if not any(_is_vk_held(vk) for vk in vks):
+            break
+        time.sleep(RELEASE_POLL_SECONDS)
+    if not recording or shutdown_event.is_set():
+        return
+    if time.monotonic() - press_time >= HOLD_TAP_SECONDS:
+        _stop_and_transcribe()
+
+
 def toggle_recording():
     """Toggle recording on/off on hotkey press."""
-    global recording, recording_timer, transcribing, _last_record_trigger
+    global recording, recording_timer, _last_record_trigger
 
     # Holding the combo makes the OS auto-repeat the final key (~30/s), which
     # fires this hotkey over and over. Treat triggers arriving closer than the
@@ -709,21 +742,16 @@ def toggle_recording():
             update_tray(False)
             winsound.Beep(300, 200)
             return
-        log.info("Recording...")
+        log.info("Recording (hold)..." if RECORD_MODE == "hold" else "Recording...")
         winsound.Beep(1000, 150)
         update_tray(True)
         recording_timer = threading.Timer(MAX_DURATION, _timeout_cancel)
         recording_timer.daemon = True
         recording_timer.start()
+        if RECORD_MODE == "hold":
+            threading.Thread(target=_watch_release, args=(now, record_release_vks), daemon=True).start()
     else:  # "stop"
-        if recording_timer is not None:
-            recording_timer.cancel()
-            recording_timer = None
-        recording = False
-        transcribing = True
-        log.info("Stopped, transcribing...")
-        winsound.Beep(500, 150)
-        threading.Thread(target=stop_recording_and_transcribe, daemon=True).start()
+        _stop_and_transcribe()
 
 
 def quit_app():
