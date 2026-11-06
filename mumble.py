@@ -273,9 +273,23 @@ def _parse_hotkey(hotkey):
     return flags, vk
 
 
+def _is_vk_held(vk):
+    """True if virtual key `vk` is currently down (live OS state; ignores the was-pressed low bit)."""
+    return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
+
+
 def _is_key_held(name):
     """True if any physical key for the modifier `name` is currently down (live OS state)."""
-    return any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MODIFIER_VKS.get(name, ()))
+    return any(_is_vk_held(vk) for vk in _MODIFIER_VKS.get(name, ()))
+
+
+def _release_vks(hotkey):
+    """Virtual keys whose release ends a hold: the main key, or for a modifier-only chord its last part."""
+    _, vk = _parse_hotkey(hotkey)
+    if vk is not None:
+        return (vk,)
+    last = hotkey.split("+")[-1].strip().lower()
+    return _FLAG_VKS[_MOD_FLAGS[last]]
 
 
 class HotkeyManager:
@@ -386,6 +400,7 @@ kb = KBController()
 model = None
 device_index = None
 record_rate = 48000
+record_release_vks = ()
 input_stream = None
 tray_icon = None
 shutdown_event = threading.Event()
@@ -781,7 +796,7 @@ def main():
 
 def _run():
     """Initialise audio, model, tray and hotkeys, then block until quit."""
-    global model, device_index, record_rate, RECORD_MODE
+    global model, device_index, record_rate, RECORD_MODE, record_release_vks
 
     RECORD_MODE = _validate_record_mode(RECORD_MODE)
 
@@ -801,6 +816,7 @@ def _run():
     setup_tray()
 
     # Register hotkeys
+    record_release_vks = _release_vks(HOTKEY)
     hotkeys = HotkeyManager()
     hotkeys.register(HOTKEY, toggle_recording)
     hotkeys.register(CANCEL_HOTKEY, cancel_recording)

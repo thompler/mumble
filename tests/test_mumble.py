@@ -274,3 +274,19 @@ def test_main_rejects_unknown_record_mode(monkeypatch, tmp_path, caplog):
         if isinstance(h, logging.FileHandler):
             mumble.log.removeHandler(h)
             h.close()
+
+
+def test_release_vks_for_plain_hotkey_is_main_key():
+    assert mumble._release_vks("ctrl+alt+space") == (VK_SPACE,)
+    assert mumble._release_vks("shift+f8") == (VK_F8,)
+
+
+def test_release_vks_for_chord_is_main_modifier_keys():
+    assert mumble._release_vks("ctrl+alt+win") == (0x5B, 0x5C)
+    assert mumble._release_vks("ctrl+alt") == (0x12,)
+
+
+def test_is_vk_held_reads_high_bit(monkeypatch):
+    monkeypatch.setattr(mumble._user32, "GetAsyncKeyState", lambda vk: 0x8000 if vk == VK_SPACE else 0x0001)
+    assert mumble._is_vk_held(VK_SPACE) is True
+    assert mumble._is_vk_held(VK_F8) is False   # low bit (was pressed since last call) must not count
