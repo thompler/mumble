@@ -703,7 +703,14 @@ def _watch_release(press_time, vks):
 
     A release within HOLD_TAP_SECONDS of the press is a tap: recording keeps
     running until the next press. Does nothing if the recording ended first.
+
+    The watcher starts only after the stream is open and the start beep has
+    played, so elapsed time at the first observed key-up is unreliable. A key
+    already up on the first poll (quick tap, or an elevated window where the
+    key always reads up) is therefore treated as a tap whatever the clock says.
     """
+    if not any(_is_vk_held(vk) for vk in vks):
+        return
     while recording and not shutdown_event.is_set():
         if not any(_is_vk_held(vk) for vk in vks):
             break

@@ -237,7 +237,7 @@ def test_hotkey_manager_reports_registration_failure():
     try:
         second = mumble.HotkeyManager()
         second.register("ctrl+alt+shift+f24", lambda: None)
-        with pytest.raises(OSError, match="ctrl\+alt\+shift\+f24"):
+        with pytest.raises(OSError, match=r"ctrl\+alt\+shift\+f24"):
             second.start()
         assert not second.is_alive()
     finally:
@@ -306,7 +306,17 @@ def test_is_vk_held_reads_high_bit(monkeypatch):
 # --- Hold-to-record release watcher ---
 
 def _settle():
-    time.sleep(0.05)   # let the watcher thread poll a few times
+    time.sleep(0.05)   # let the watcher thread poll a few times; only for "nothing changed" checks
+
+
+def _wait_until(predicate, timeout=1.0):
+    """Poll every 5 ms until predicate() is true or timeout elapses; return its last value."""
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
 
 
 def test_hold_stops_when_main_key_released_after_threshold(monkeypatch):
@@ -318,8 +328,7 @@ def test_hold_stops_when_main_key_released_after_threshold(monkeypatch):
     _settle()
     assert mumble.recording is True
     held.clear()              # main key up
-    _settle()
-    assert mumble.recording is False
+    assert _wait_until(lambda: mumble.recording is False)
 
 
 def test_hold_tap_keeps_recording_until_next_press(monkeypatch):
@@ -353,8 +362,7 @@ def test_hold_only_main_key_release_counts(monkeypatch):
     _settle()
     assert mumble.recording is True
     held.discard(VK_SPACE)
-    _settle()
-    assert mumble.recording is False
+    assert _wait_until(lambda: mumble.recording is False)
 
 
 def test_hold_watcher_does_nothing_after_cancel(monkeypatch):
@@ -362,7 +370,10 @@ def test_hold_watcher_does_nothing_after_cancel(monkeypatch):
     monkeypatch.setattr(mumble, "stop_stream", lambda: setattr(mumble, "recording", False))
     stops = []
     monkeypatch.setattr(mumble, "_stop_and_transcribe", lambda: stops.append(1))
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
     mumble.toggle_recording()
+    clock[0] = 100.5          # past the tap window, so only the post-loop guard prevents a stop
     mumble.cancel_recording()
     held.clear()
     _settle()
@@ -377,5 +388,21 @@ def test_toggle_mode_ignores_release(monkeypatch):
     mumble.toggle_recording()
     clock[0] = 100.5
     held.clear()
+    _settle()
+    assert mumble.recording is True
+
+
+def test_hold_tap_survives_slow_startup(monkeypatch):
+    # Stream open plus the start beep can outlast HOLD_TAP_SECONDS; a key already
+    # up on the first poll must still be treated as a tap, not a hold.
+    _quiet_toggle_env(monkeypatch, mode="hold", held=set())
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+
+    def slow_start():
+        clock[0] += 0.5
+        return True
+    monkeypatch.setattr(mumble, "start_recording", slow_start)
+    mumble.toggle_recording()
     _settle()
     assert mumble.recording is True
