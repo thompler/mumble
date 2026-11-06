@@ -68,3 +68,15 @@ def test_main_logs_and_exits_on_startup_failure(monkeypatch, tmp_path, caplog):
         if isinstance(h, logging.FileHandler):
             mumble.log.removeHandler(h)
             h.close()
+
+
+def test_wait_for_modifier_release_gives_up_after_timeout(monkeypatch):
+    monkeypatch.setattr(mumble.keyboard, "is_pressed", lambda key: True)  # stuck modifier
+    monkeypatch.setattr(mumble.time, "sleep", lambda s: None)
+    released = mumble._wait_for_modifier_release(("ctrl", "alt"), timeout=0.05)
+    assert released is False
+
+
+def test_wait_for_modifier_release_returns_true_when_nothing_held(monkeypatch):
+    monkeypatch.setattr(mumble.keyboard, "is_pressed", lambda key: False)
+    assert mumble._wait_for_modifier_release(("ctrl", "alt"), timeout=0.05) is True

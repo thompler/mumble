@@ -349,11 +349,27 @@ def stop_recording_and_transcribe():
         transcribing = False
 
 
+def _wait_for_modifier_release(modifiers, timeout=2.0):
+    """Block until none of `modifiers` is held, or `timeout` seconds pass.
+
+    Returns True if the keys were released, False on timeout. The timeout
+    matters because the `keyboard` module can miss a key-up (e.g. after lock
+    screen or RDP) and report a modifier as held forever; hotkey callbacks all
+    run on one thread, so an unbounded wait here would freeze every hotkey.
+    """
+    deadline = time.monotonic() + timeout
+    while any(keyboard.is_pressed(m) for m in modifiers):
+        if time.monotonic() >= deadline:
+            log.warning(f"Modifier keys still held after {timeout}s — pasting anyway")
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def paste_text(text):
     """Copy text to clipboard and paste into the active window."""
     # Wait for modifier keys to be released (e.g. from the hotkey that triggered this)
-    while keyboard.is_pressed('alt') or keyboard.is_pressed('ctrl'):
-        time.sleep(0.05)
+    _wait_for_modifier_release(("ctrl", "alt"))
     time.sleep(0.1)
     pyperclip.copy(text)
     kb.press(Key.ctrl)
