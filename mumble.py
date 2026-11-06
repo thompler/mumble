@@ -502,8 +502,6 @@ def main():
         _remove_startup()
         return
 
-    global model, device_index, record_rate
-
     _setup_logging(LOG_FILE)
     log.info("=" * 40)
     log.info("Mumble starting")
@@ -511,6 +509,20 @@ def main():
         log.info(f"Config loaded from {CONFIG_PATH}")
     else:
         log.warning("No mumble.toml found, using defaults")
+
+    # mumble-gui has no console, so an unhandled exception here would be
+    # invisible. Log it, beep, and exit non-zero instead.
+    try:
+        _run()
+    except Exception:
+        log.exception("Fatal error during startup")
+        winsound.Beep(300, 500)
+        sys.exit(1)
+
+
+def _run():
+    """Initialise audio, model, tray and hotkeys, then block until quit."""
+    global model, device_index, record_rate
 
     # Find C200 mic
     device_index, detected_rate = find_c200_device()

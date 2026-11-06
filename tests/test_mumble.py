@@ -40,3 +40,31 @@ def test_setup_logging_writes_to_given_file(tmp_path):
     finally:
         mumble.log.removeHandler(handler)
         handler.close()
+
+
+def test_main_logs_and_exits_on_startup_failure(monkeypatch, tmp_path, caplog):
+    import logging
+    beeps = []
+    monkeypatch.setattr("sys.argv", ["mumble"])
+    monkeypatch.setattr(mumble, "LOG_FILE", str(tmp_path / "mumble.log"))
+    monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: beeps.append(a))
+
+    def boom():
+        raise RuntimeError("PortAudio exploded")
+
+    monkeypatch.setattr(mumble, "find_c200_device", boom)
+
+    with caplog.at_level(logging.ERROR, logger="mumble"):
+        try:
+            mumble.main()
+        except SystemExit as e:
+            assert e.code == 1
+        else:
+            raise AssertionError("main() should exit non-zero on startup failure")
+
+    assert "PortAudio exploded" in caplog.text
+    assert beeps, "expected an audible error beep"
+    for h in list(mumble.log.handlers):
+        if isinstance(h, logging.FileHandler):
+            mumble.log.removeHandler(h)
+            h.close()
