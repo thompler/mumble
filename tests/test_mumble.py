@@ -514,3 +514,37 @@ def test_probe_owned_hotkeys_reports_combos_held_by_others():
     finally:
         mgr.stop()
     assert mumble._probe_owned_hotkeys(["ctrl+alt+shift+f24"]) == []
+
+
+# --- A hotkey re-fire while the main key has never been released is auto-repeat, not a press ---
+# (Windows forgets MOD_NOREPEAT suppression once when hotkeys are registered mid-hold, e.g. the shield.)
+
+def test_hold_refire_while_main_key_still_held_is_ignored(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="hold", held={VK_SPACE})
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    _settle()
+    clock[0] = 100.5
+    mumble.toggle_recording()          # the re-fire, past the debounce window
+    assert mumble.recording is True, "re-fire with the key still down must not stop the recording"
+    held.clear()
+    assert _wait_until(lambda: mumble.recording is False), "real release must still stop it"
+
+
+def test_toggle_refire_while_main_key_still_held_is_ignored(monkeypatch):
+    held = _quiet_toggle_env(monkeypatch, mode="toggle", held={VK_SPACE})
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    _settle()
+    clock[0] = 100.5
+    mumble.toggle_recording()          # the re-fire
+    assert mumble.recording is True
+    held.clear()                       # user lets go; toggle mode keeps recording
+    _settle()
+    assert mumble.recording is True
+    clock[0] = 101.0
+    held.add(VK_SPACE)                 # a genuine second press
+    mumble.toggle_recording()
+    assert mumble.recording is False

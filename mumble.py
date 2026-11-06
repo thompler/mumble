@@ -486,6 +486,7 @@ tray_icon = None
 shutdown_event = threading.Event()
 recording_timer = None
 _last_record_trigger = 0.0
+_main_key_released = True       # False from a record press until the watcher sees the main key up
 RECORD_DEBOUNCE_SECONDS = 0.3
 HOLD_TAP_SECONDS = 0.3
 RELEASE_POLL_SECONDS = 0.02
@@ -794,23 +795,34 @@ def _stop_and_transcribe():
 
 
 def _watch_release(press_time, vks):
-    """Hold mode: stop recording when the hotkey's main key is released.
+    """Watch the hotkey's main key after a record press; in hold mode, stop on release.
 
-    A release within HOLD_TAP_SECONDS of the press is a tap: recording keeps
-    running until the next press. Does nothing if the recording ended first.
+    Runs in both modes. It records the first observed release in
+    _main_key_released so toggle_recording() can tell a genuine second press
+    from an auto-repeat re-fire (Windows drops MOD_NOREPEAT suppression once
+    whenever hotkeys are registered mid-hold, which the shield push does).
+
+    Hold mode: a release within HOLD_TAP_SECONDS of the press is a tap and
+    recording keeps running until the next press; a later release stops it.
+    Does nothing if the recording ended first.
 
     The watcher starts only after the stream is open and the start beep has
     played, so elapsed time at the first observed key-up is unreliable. A key
     already up on the first poll (quick tap, or an elevated window where the
     key always reads up) is therefore treated as a tap whatever the clock says.
     """
+    global _main_key_released
     if not any(_is_vk_held(vk) for vk in vks):
+        _main_key_released = True
         return
     while recording and not shutdown_event.is_set():
         if not any(_is_vk_held(vk) for vk in vks):
+            _main_key_released = True
             break
         time.sleep(RELEASE_POLL_SECONDS)
     if not recording or shutdown_event.is_set():
+        return
+    if RECORD_MODE != "hold":
         return
     if time.monotonic() - press_time >= HOLD_TAP_SECONDS:
         _stop_and_transcribe()
@@ -818,7 +830,7 @@ def _watch_release(press_time, vks):
 
 def toggle_recording():
     """Toggle recording on/off on hotkey press."""
-    global recording, recording_timer, _last_record_trigger
+    global recording, recording_timer, _last_record_trigger, _main_key_released
 
     # Holding the combo makes the OS auto-repeat the final key (~30/s), which
     # fires this hotkey over and over. Treat triggers arriving closer than the
@@ -828,6 +840,10 @@ def toggle_recording():
     is_repeat = (now - _last_record_trigger) < RECORD_DEBOUNCE_SECONDS
     _last_record_trigger = now
     if is_repeat:
+        return
+    if recording and not _main_key_released:
+        # The main key has not been let go since the press that started this
+        # recording, so this trigger is auto-repeat, not a second press.
         return
 
     action = decide_toggle_action(recording, transcribing)
@@ -852,8 +868,8 @@ def toggle_recording():
         recording_timer.start()
         if hotkeys is not None and record_shield_hotkeys:
             hotkeys.push_shield(record_shield_hotkeys)
-        if RECORD_MODE == "hold":
-            threading.Thread(target=_watch_release, args=(now, record_release_vks), daemon=True).start()
+        _main_key_released = False
+        threading.Thread(target=_watch_release, args=(now, record_release_vks), daemon=True).start()
     else:  # "stop"
         _stop_and_transcribe()
 
