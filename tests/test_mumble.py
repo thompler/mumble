@@ -242,3 +242,35 @@ def test_is_key_held_checks_both_win_keys(monkeypatch):
     assert mumble._is_key_held("win") is True
     assert set(asked) == {0x5B, 0x5C}
     assert mumble._is_key_held("ctrl") is False
+
+
+def test_default_record_mode_is_hold():
+    assert mumble._DEFAULTS["hotkeys"]["record_mode"] == "hold"
+    assert mumble.RECORD_MODES == ("hold", "toggle")
+
+
+def test_record_mode_is_normalised():
+    assert mumble._validate_record_mode("Hold") == "hold"
+    assert mumble._validate_record_mode("TOGGLE") == "toggle"
+
+
+def test_validate_record_mode_rejects_unknown():
+    with pytest.raises(ValueError, match="hotkeys.record_mode.*bogus"):
+        mumble._validate_record_mode("bogus")
+
+
+def test_main_rejects_unknown_record_mode(monkeypatch, tmp_path, caplog):
+    import logging
+    monkeypatch.setattr("sys.argv", ["mumble"])
+    monkeypatch.setattr(mumble, "LOG_FILE", str(tmp_path / "mumble.log"))
+    monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: None)
+    monkeypatch.setattr(mumble, "RECORD_MODE", "bogus")
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: pytest.fail("validation must run before device lookup"))
+    with caplog.at_level(logging.ERROR, logger="mumble"), pytest.raises(SystemExit) as e:
+        mumble.main()
+    assert e.value.code == 1
+    assert "hotkeys.record_mode" in caplog.text
+    for h in list(mumble.log.handlers):
+        if isinstance(h, logging.FileHandler):
+            mumble.log.removeHandler(h)
+            h.close()

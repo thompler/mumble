@@ -3,6 +3,7 @@ record = "ctrl+alt+space"
 cancel = "ctrl+alt+x"
 quit = "ctrl+alt+q"
 repaste = "ctrl+alt+v"
+record_mode = "hold"
 
 [whisper]
 model = "small.en"

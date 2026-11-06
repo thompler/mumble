@@ -100,6 +100,7 @@ _DEFAULTS = {
         "cancel": "ctrl+alt+x",
         "quit": "ctrl+alt+q",
         "repaste": "ctrl+alt+v",
+        "record_mode": "hold",
     },
     "whisper": {
         "model": "small.en",
@@ -163,6 +164,23 @@ def _hotkey_modifiers(hotkeys):
 
 
 HOTKEY_MODIFIERS = _hotkey_modifiers([HOTKEY, CANCEL_HOTKEY, QUIT_HOTKEY, REPASTE_HOTKEY])
+
+RECORD_MODES = ("hold", "toggle")
+
+
+def _validate_record_mode(mode: str) -> str:
+    """Return the lowercased record mode, or raise ValueError if it is not supported."""
+    normalised = str(mode).strip().lower()
+    if normalised not in RECORD_MODES:
+        raise ValueError(
+            f"Invalid hotkeys.record_mode {mode!r}: expected one of {', '.join(RECORD_MODES)}"
+        )
+    return normalised
+
+
+# Raw config value; validated at the top of _run() so a bad value is logged
+# by main()'s fatal-error path instead of crashing at import.
+RECORD_MODE = _get("hotkeys", "record_mode")
 
 # --- Slash command trigger aliases ---
 _CLAUDE_ALIASES = {"clod", "clawed", "cloud", "claud", "clogged", "klaud", "klaude"}
@@ -436,7 +454,7 @@ def setup_tray():
     global tray_icon
     menu = pystray.Menu(
         pystray.MenuItem("Hotkeys", pystray.Menu(
-            pystray.MenuItem(f"Record:  {HOTKEY}", None, enabled=False),
+            pystray.MenuItem(f"Record:  {HOTKEY} ({RECORD_MODE})", None, enabled=False),
             pystray.MenuItem(f"Cancel:  {CANCEL_HOTKEY}", None, enabled=False),
             pystray.MenuItem(f"Repaste: {REPASTE_HOTKEY}", None, enabled=False),
             pystray.MenuItem(f"Quit:    {QUIT_HOTKEY}", None, enabled=False),
@@ -763,7 +781,9 @@ def main():
 
 def _run():
     """Initialise audio, model, tray and hotkeys, then block until quit."""
-    global model, device_index, record_rate
+    global model, device_index, record_rate, RECORD_MODE
+
+    RECORD_MODE = _validate_record_mode(RECORD_MODE)
 
     # Find C200 mic
     device_index, detected_rate = find_c200_device()
