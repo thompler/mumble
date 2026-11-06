@@ -80,3 +80,21 @@ def test_wait_for_modifier_release_gives_up_after_timeout(monkeypatch):
 def test_wait_for_modifier_release_returns_true_when_nothing_held(monkeypatch):
     monkeypatch.setattr(mumble.keyboard, "is_pressed", lambda key: False)
     assert mumble._wait_for_modifier_release(("ctrl", "alt"), timeout=0.05) is True
+
+
+def test_hotkey_modifiers_collects_known_modifier_keys():
+    mods = mumble._hotkey_modifiers(["ctrl+alt+win", "ctrl+alt+x", "shift+f8", "f9"])
+    assert mods == {"ctrl", "alt", "win", "shift"}
+
+
+def test_paste_text_waits_on_configured_modifiers(monkeypatch):
+    waited = []
+    monkeypatch.setattr(mumble, "_wait_for_modifier_release",
+                        lambda mods, timeout=2.0: waited.append(set(mods)) or True)
+    monkeypatch.setattr(mumble.time, "sleep", lambda s: None)
+    monkeypatch.setattr(mumble.pyperclip, "copy", lambda t: None)
+    monkeypatch.setattr(mumble.kb, "press", lambda k: None)
+    monkeypatch.setattr(mumble.kb, "release", lambda k: None)
+    monkeypatch.setattr(mumble, "HOTKEY_MODIFIERS", {"ctrl", "alt", "win"})
+    mumble.paste_text("hi")
+    assert waited == [{"ctrl", "alt", "win"}]

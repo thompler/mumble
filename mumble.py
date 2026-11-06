@@ -136,6 +136,28 @@ DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 MAX_DURATION = _get("audio", "max_duration")
 COMMAND_TRIGGER = _get("commands", "trigger")
 
+
+_MODIFIER_NAMES = {"ctrl", "control", "alt", "shift", "win", "windows", "cmd", "meta", "super"}
+
+
+def _hotkey_modifiers(hotkeys):
+    """Return the set of modifier key names used by any of the given hotkey strings.
+
+    A '+'-separated part counts as a modifier if its base name (ignoring a
+    "left"/"right" prefix) is a known modifier, so "ctrl+alt+win" contributes
+    {"ctrl", "alt", "win"} and "f9" contributes nothing.
+    """
+    mods = set()
+    for hk in hotkeys:
+        for part in hk.split("+"):
+            part = part.strip().lower()
+            if part.split()[-1] in _MODIFIER_NAMES:
+                mods.add(part)
+    return mods
+
+
+HOTKEY_MODIFIERS = _hotkey_modifiers([HOTKEY, CANCEL_HOTKEY, QUIT_HOTKEY, REPASTE_HOTKEY])
+
 # --- Slash command trigger aliases ---
 _CLAUDE_ALIASES = {"clod", "clawed", "cloud", "claud", "clogged", "klaud", "klaude"}
 
@@ -369,7 +391,7 @@ def _wait_for_modifier_release(modifiers, timeout=2.0):
 def paste_text(text):
     """Copy text to clipboard and paste into the active window."""
     # Wait for modifier keys to be released (e.g. from the hotkey that triggered this)
-    _wait_for_modifier_release(("ctrl", "alt"))
+    _wait_for_modifier_release(HOTKEY_MODIFIERS)
     time.sleep(0.1)
     pyperclip.copy(text)
     kb.press(Key.ctrl)
