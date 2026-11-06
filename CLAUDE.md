@@ -24,7 +24,7 @@ Build system is hatchling (configured in `pyproject.toml`). Tests live in `tests
 
 Everything lives in `mumble.py` (~400 lines). Key flow:
 
-1. **Config** — `_find_config()` searches `~/.mumble/mumble.toml` then script-dir then falls back to `_DEFAULTS` dict. Dev mode (mumble.toml next to script) keeps logs local; installed mode uses `~/.mumble/`.
+1. **Config** — `_find_config()` searches `~/.mumble/mumble.toml` then script-dir then falls back to `_DEFAULTS` dict. Dev mode (pyproject.toml next to script) keeps logs local; installed mode uses `~/.mumble/`. `mumble.toml` in the repo root is gitignored personal config; `mumble.toml.example` is the tracked template.
 2. **Audio** — `sounddevice.InputStream` records to `audio_chunks` list. Targets Anker C200 mic by name substring, falls back to system default.
 3. **Transcription** — `faster_whisper.WhisperModel` (small.en, CPU, int8). Audio is resampled to 16kHz via `scipy.signal.resample_poly` if needed.
 4. **Post-processing** — Digit collapse (`1 2 3 4` → `1234`), double-space collapse. Voice commands: the trigger word (`claude`, plus homophone aliases) + one word becomes a slash command (`/clear`); "show help" opens the README. Applied in `stop_recording_and_transcribe()`.

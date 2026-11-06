@@ -101,14 +101,14 @@ Right-click the icon for options:
 
 ## Logging
 
-Logs are written to `mumble.log`. When installed via pip, logs go to `~/.mumble/mumble.log`. When running from a source checkout (where `mumble.toml` sits next to `mumble.py`), logs go to that same directory. The log rotates at 1 MB with one backup file.
+Logs are written to `mumble.log`. When installed via pip, logs go to `~/.mumble/mumble.log`. When running from a source checkout (where `pyproject.toml` sits next to `mumble.py`), logs go to that same directory. The log rotates at 1 MB with one backup file.
 
 ## Configuration
 
 Settings live in `mumble.toml`. Mumble checks for config in this order:
 
 1. `~/.mumble/mumble.toml` (user config — recommended for pip installs)
-2. Same directory as `mumble.py` (dev / source checkout mode)
+2. Same directory as `mumble.py` (dev / source checkout mode). This file is gitignored; copy `mumble.toml.example` to `mumble.toml` to start.
 3. Built-in defaults
 
 To customize, create `~/.mumble/mumble.toml`:

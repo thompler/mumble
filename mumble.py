@@ -41,8 +41,13 @@ _USER_DIR = os.path.join(os.path.expanduser("~"), ".mumble")
 
 
 def _is_dev_mode():
-    """True when running from a source checkout (mumble.toml sits next to the script)."""
-    return os.path.isfile(os.path.join(_SCRIPT_DIR, "mumble.toml"))
+    """True when running from a source checkout (pyproject.toml sits next to the script).
+
+    pyproject.toml is never installed into site-packages, so its presence is a
+    reliable checkout marker. mumble.toml is not used because it is also a
+    legitimate (untracked) user config file in a checkout.
+    """
+    return os.path.isfile(os.path.join(_SCRIPT_DIR, "pyproject.toml"))
 
 
 def _find_config():

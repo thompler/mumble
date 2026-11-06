@@ -11,3 +11,6 @@ sample_rate = 16000
 [audio]
 device_name = "C200"
 max_duration = 90
+
+[commands]
+trigger = "claude"

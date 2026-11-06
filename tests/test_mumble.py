@@ -98,3 +98,11 @@ def test_paste_text_waits_on_configured_modifiers(monkeypatch):
     monkeypatch.setattr(mumble, "HOTKEY_MODIFIERS", {"ctrl", "alt", "win"})
     mumble.paste_text("hi")
     assert waited == [{"ctrl", "alt", "win"}]
+
+
+def test_dev_mode_is_detected_by_pyproject_not_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(mumble, "_SCRIPT_DIR", str(tmp_path))
+    (tmp_path / "mumble.toml").write_text("")
+    assert mumble._is_dev_mode() is False, "a user config alone must not mean dev mode"
+    (tmp_path / "pyproject.toml").write_text("")
+    assert mumble._is_dev_mode() is True
