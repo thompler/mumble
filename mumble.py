@@ -221,11 +221,18 @@ _MODIFIER_VKS = {
 }
 
 
+CHORD_POLL_SECONDS = 0.02
+# Virtual keys to poll for each modifier flag when a chord has no main key.
+_FLAG_VKS = {MOD_CONTROL: (0x11,), MOD_ALT: (0x12,), MOD_SHIFT: (0x10,), MOD_WIN: (0x5B, 0x5C)}
+
+
 def _parse_hotkey(hotkey):
     """Turn "ctrl+alt+x" into (modifier_flags, virtual_key) for RegisterHotKey.
 
-    The last '+'-separated part is the main key; it may itself be a modifier
-    name (e.g. "ctrl+alt+win" registers VK_LWIN with Ctrl+Alt held).
+    The last '+'-separated part is normally the main key. If it is itself a
+    modifier (e.g. "ctrl+alt+win") the result is (all_modifier_flags, None):
+    Windows accepts such a registration but never delivers it, so these
+    modifier-only chords are detected by polling instead (see HotkeyManager).
     """
     parts = [p.strip().lower() for p in hotkey.split("+")]
     *modifiers, key = parts
@@ -234,6 +241,8 @@ def _parse_hotkey(hotkey):
         if m not in _MOD_FLAGS:
             raise ValueError(f"Unknown modifier {m!r} in hotkey {hotkey!r}")
         flags |= _MOD_FLAGS[m]
+    if key in _MOD_FLAGS:
+        return flags | _MOD_FLAGS[key], None
     if key in _NAMED_VKS:
         vk = _NAMED_VKS[key]
     elif len(key) == 1:
@@ -252,36 +261,68 @@ def _is_key_held(name):
 
 
 class HotkeyManager:
-    """Registers global hotkeys on a dedicated message-loop thread and dispatches callbacks there."""
+    """Global hotkeys: RegisterHotKey on a message-loop thread, plus a poller for modifier-only chords.
+
+    Callbacks run on whichever of the two threads detected the hotkey.
+    """
 
     def __init__(self):
-        self._bindings = []        # (hotkey_str, (flags, vk), callback)
+        self._bindings = []        # RegisterHotKey: (hotkey_str, (flags, vk), callback)
+        self._chords = []          # polled:        (hotkey_str, [vk_alternatives...], callback)
         self._thread = None
+        self._chord_thread = None
         self.thread_id = None
         self._ready = threading.Event()
+        self._stop = threading.Event()
         self._error = None
 
     def register(self, hotkey, callback):
         """Queue a hotkey for registration. Parses eagerly so bad strings fail before start()."""
-        self._bindings.append((hotkey, _parse_hotkey(hotkey), callback))
+        flags, vk = _parse_hotkey(hotkey)
+        if vk is None:
+            vks = [_FLAG_VKS[f] for f in _FLAG_VKS if flags & f]
+            self._chords.append((hotkey, vks, callback))
+        else:
+            self._bindings.append((hotkey, (flags, vk), callback))
 
     def start(self):
-        """Start the loop thread and block until every hotkey is registered. Raises on failure."""
+        """Start the threads and block until every hotkey is registered. Raises on failure."""
         self._thread = threading.Thread(target=self._loop, name="hotkeys", daemon=True)
         self._thread.start()
         self._ready.wait(timeout=5)
         if self._error is not None:
             self._thread.join(timeout=2)
             raise self._error
+        if self._chords:
+            self._chord_thread = threading.Thread(target=self._poll_chords, name="hotkey-chords", daemon=True)
+            self._chord_thread.start()
 
     def stop(self):
+        self._stop.set()
         if self.thread_id is not None:
             _user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
-        if self._thread is not None:
-            self._thread.join(timeout=2)
+        for t in (self._thread, self._chord_thread):
+            if t is not None:
+                t.join(timeout=2)
 
     def is_alive(self):
-        return self._thread is not None and self._thread.is_alive()
+        return any(t is not None and t.is_alive() for t in (self._thread, self._chord_thread))
+
+    def _poll_chords(self):
+        """Fire each chord once per hold: on the transition from "not all held" to "all held"."""
+        def chord_held(vks):
+            return all(any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in alts) for alts in vks)
+
+        was_held = [chord_held(vks) for _, vks, _ in self._chords]
+        while not self._stop.wait(CHORD_POLL_SECONDS):
+            for i, (hotkey, vks, callback) in enumerate(self._chords):
+                now_held = chord_held(vks)
+                if now_held and not was_held[i]:
+                    try:
+                        callback()
+                    except Exception:
+                        log.exception(f"Hotkey handler for {hotkey!r} failed")
+                was_held[i] = now_held
 
     def _loop(self):
         self.thread_id = _kernel32.GetCurrentThreadId()

@@ -31,7 +31,7 @@ Everything lives in `mumble.py` (~400 lines). Key flow:
 5. **Paste** — Copies to clipboard via `pyperclip`, then simulates Ctrl+V via `pynput`.
 6. **Tray** — `pystray` icon (green=idle, red=recording) with hotkey info and quit menu.
 
-Hotkeys are registered globally through the Win32 `RegisterHotKey` API via ctypes (`HotkeyManager`, with `MOD_NOREPEAT`); callbacks run on its message-loop thread. The modifier-release wait before pasting reads live key state via `GetAsyncKeyState`. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit. A recording auto-cancels after `audio.max_duration` seconds (default 90) via a `threading.Timer`. A `transcribing` flag guards against starting a new recording while a transcription is still in flight; `decide_toggle_action()` encodes the start/stop/ignore state machine.
+Hotkeys are registered globally through the Win32 `RegisterHotKey` API via ctypes (`HotkeyManager`, with `MOD_NOREPEAT`); callbacks run on its message-loop thread. Modifier-only chords such as `ctrl+alt+win` cannot be expressed with `RegisterHotKey` (Windows accepts `VK_LWIN` as a main key but never delivers it), so `HotkeyManager` detects those by polling `GetAsyncKeyState` and firing on the rising edge. The modifier-release wait before pasting reads live key state via `GetAsyncKeyState`. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit. A recording auto-cancels after `audio.max_duration` seconds (default 90) via a `threading.Timer`. A `transcribing` flag guards against starting a new recording while a transcription is still in flight; `decide_toggle_action()` encodes the start/stop/ignore state machine.
 
 ## Key decisions
 

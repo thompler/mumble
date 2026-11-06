@@ -151,6 +151,7 @@ def test_toggle_accepts_distinct_press_after_release(monkeypatch):
 
 import ctypes
 import threading
+import time
 
 import pytest
 
@@ -159,8 +160,37 @@ MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 1, 2, 4, 8
 WM_HOTKEY = 0x0312
 
 
-def test_parse_hotkey_win_as_main_key():
-    assert mumble._parse_hotkey("ctrl+alt+win") == (MOD_CONTROL | MOD_ALT, VK_LWIN)
+def test_parse_hotkey_modifier_only_chord_has_no_main_key():
+    # Windows accepts VK_LWIN as a RegisterHotKey main key but never delivers it,
+    # so a chord made only of modifiers is flagged (vk=None) for the poller path.
+    assert mumble._parse_hotkey("ctrl+alt+win") == (MOD_CONTROL | MOD_ALT | MOD_WIN, None)
+
+
+def test_hotkey_manager_fires_modifier_chord_once_per_hold(monkeypatch):
+    held = set()
+    monkeypatch.setattr(mumble._user32, "GetAsyncKeyState", lambda vk: 0x8000 if vk in held else 0)
+    monkeypatch.setattr(mumble, "CHORD_POLL_SECONDS", 0.005)
+    fires = []
+    mgr = mumble.HotkeyManager()
+    mgr.register("ctrl+alt+win", lambda: fires.append(1))
+    mgr.start()
+    try:
+        held.update({0x11, 0x12})          # ctrl + alt only: not yet
+        time.sleep(0.05)
+        assert fires == []
+        held.add(0x5B)                      # left win joins: chord complete
+        time.sleep(0.05)
+        assert fires == [1]
+        time.sleep(0.1)                     # still held: must not re-fire
+        assert fires == [1]
+        held.clear()
+        time.sleep(0.05)
+        held.update({0x11, 0x12, 0x5C})     # again, with right win this time
+        time.sleep(0.05)
+        assert fires == [1, 1]
+    finally:
+        mgr.stop()
+    assert not mgr.is_alive()
 
 
 def test_parse_hotkey_named_and_character_keys():
