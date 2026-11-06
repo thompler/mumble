@@ -71,11 +71,20 @@ LOG_FILE = os.path.join(_log_dir(), "mumble.log")
 
 log = logging.getLogger("mumble")
 log.setLevel(logging.INFO)
-handler = logging.handlers.RotatingFileHandler(
-    LOG_FILE, maxBytes=1_000_000, backupCount=1,
-)
-handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-log.addHandler(handler)
+
+
+def _setup_logging(log_file):
+    """Attach a rotating file handler to the mumble logger. Returns the handler.
+
+    Called from main() rather than at import time so that importing the module
+    (e.g. from tests) never touches the real log file.
+    """
+    handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1_000_000, backupCount=1,
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    log.addHandler(handler)
+    return handler
 
 
 # --- Config ---
@@ -99,15 +108,15 @@ _DEFAULTS = {
     },
 }
 
+CONFIG_PATH = _find_config()
+
+
 def _load_config():
     """Load config from mumble.toml, falling back to defaults if missing."""
-    config_path = _find_config()
-    if config_path:
-        with open(config_path, "rb") as f:
+    if CONFIG_PATH:
+        with open(CONFIG_PATH, "rb") as f:
             cfg = tomllib.load(f)
-        logging.getLogger("mumble").info(f"Config loaded from {config_path}")
     else:
-        logging.getLogger("mumble").warning("No mumble.toml found, using defaults")
         cfg = {}
 
     def _get(section, key):
@@ -495,8 +504,13 @@ def main():
 
     global model, device_index, record_rate
 
+    _setup_logging(LOG_FILE)
     log.info("=" * 40)
     log.info("Mumble starting")
+    if CONFIG_PATH:
+        log.info(f"Config loaded from {CONFIG_PATH}")
+    else:
+        log.warning("No mumble.toml found, using defaults")
 
     # Find C200 mic
     device_index, detected_rate = find_c200_device()
