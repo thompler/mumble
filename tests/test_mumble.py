@@ -71,14 +71,14 @@ def test_main_logs_and_exits_on_startup_failure(monkeypatch, tmp_path, caplog):
 
 
 def test_wait_for_modifier_release_gives_up_after_timeout(monkeypatch):
-    monkeypatch.setattr(mumble.keyboard, "is_pressed", lambda key: True)  # stuck modifier
+    monkeypatch.setattr(mumble, "_is_key_held", lambda key: True)  # stuck modifier
     monkeypatch.setattr(mumble.time, "sleep", lambda s: None)
     released = mumble._wait_for_modifier_release(("ctrl", "alt"), timeout=0.05)
     assert released is False
 
 
 def test_wait_for_modifier_release_returns_true_when_nothing_held(monkeypatch):
-    monkeypatch.setattr(mumble.keyboard, "is_pressed", lambda key: False)
+    monkeypatch.setattr(mumble, "_is_key_held", lambda key: False)
     assert mumble._wait_for_modifier_release(("ctrl", "alt"), timeout=0.05) is True
 
 
@@ -145,3 +145,70 @@ def test_toggle_accepts_distinct_press_after_release(monkeypatch):
     clock[0] += 1.0
     mumble.toggle_recording()
     assert mumble.recording is False
+
+
+# --- Win32 RegisterHotKey layer ---
+
+import ctypes
+import threading
+
+import pytest
+
+VK_LWIN, VK_SPACE, VK_F8, VK_F24 = 0x5B, 0x20, 0x77, 0x87
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 1, 2, 4, 8
+WM_HOTKEY = 0x0312
+
+
+def test_parse_hotkey_win_as_main_key():
+    assert mumble._parse_hotkey("ctrl+alt+win") == (MOD_CONTROL | MOD_ALT, VK_LWIN)
+
+
+def test_parse_hotkey_named_and_character_keys():
+    assert mumble._parse_hotkey("ctrl+alt+space") == (MOD_CONTROL | MOD_ALT, VK_SPACE)
+    assert mumble._parse_hotkey("Ctrl+Alt+X") == (MOD_CONTROL | MOD_ALT, ord("X"))
+    assert mumble._parse_hotkey("shift+f8") == (MOD_SHIFT, VK_F8)
+    assert mumble._parse_hotkey("win+v") == (MOD_WIN, ord("V"))
+
+
+def test_parse_hotkey_rejects_unknown_key():
+    with pytest.raises(ValueError, match="bogus"):
+        mumble._parse_hotkey("ctrl+alt+bogus")
+
+
+def test_hotkey_manager_dispatches_posted_hotkey_message():
+    fired = threading.Event()
+    mgr = mumble.HotkeyManager()
+    mgr.register("ctrl+alt+shift+f24", fired.set)
+    mgr.start()
+    try:
+        # Simulate what Windows does on a press: post WM_HOTKEY (id 1) to the loop thread.
+        assert ctypes.windll.user32.PostThreadMessageW(mgr.thread_id, WM_HOTKEY, 1, 0)
+        assert fired.wait(2.0), "callback not invoked for WM_HOTKEY"
+    finally:
+        mgr.stop()
+    assert not mgr.is_alive()
+
+
+def test_hotkey_manager_reports_registration_failure():
+    first = mumble.HotkeyManager()
+    first.register("ctrl+alt+shift+f24", lambda: None)
+    first.start()
+    try:
+        second = mumble.HotkeyManager()
+        second.register("ctrl+alt+shift+f24", lambda: None)
+        with pytest.raises(OSError, match="ctrl\+alt\+shift\+f24"):
+            second.start()
+        assert not second.is_alive()
+    finally:
+        first.stop()
+
+
+def test_is_key_held_checks_both_win_keys(monkeypatch):
+    asked = []
+    def fake_state(vk):
+        asked.append(vk)
+        return 0x8000 if vk == 0x5C else 0   # only Right Win held
+    monkeypatch.setattr(mumble._user32, "GetAsyncKeyState", fake_state)
+    assert mumble._is_key_held("win") is True
+    assert set(asked) == {0x5B, 0x5C}
+    assert mumble._is_key_held("ctrl") is False

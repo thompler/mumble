@@ -11,6 +11,8 @@ Logs to mumble.log (in ~/.mumble/ when installed, or same directory in dev mode)
 """
 
 import argparse
+import ctypes
+import ctypes.wintypes as wintypes
 import logging
 import logging.handlers
 import os
@@ -24,7 +26,6 @@ import tomllib
 import winsound
 from math import gcd
 
-import keyboard
 import numpy as np
 import pyperclip
 import sounddevice as sd
@@ -172,6 +173,150 @@ def _trigger_variants(trigger):
     if trigger.lower() == "claude":
         variants |= _CLAUDE_ALIASES
     return variants
+
+# --- Global hotkeys (Win32 RegisterHotKey) ---
+#
+# The OS matches the key combination and posts WM_HOTKEY to the registering
+# thread. Unlike a low-level keyboard hook there is no callback that Windows
+# can time out and silently remove, no in-process "pressed keys" table that
+# can go stale, and MOD_NOREPEAT stops key auto-repeat from re-firing it.
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+_user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+_user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+_user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT]
+_user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+_user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+_user32.GetAsyncKeyState.restype = ctypes.c_short
+_user32.VkKeyScanW.argtypes = [wintypes.WCHAR]
+_user32.VkKeyScanW.restype = ctypes.c_short
+
+WM_HOTKEY = 0x0312
+WM_QUIT = 0x0012
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
+
+_MOD_FLAGS = {
+    "alt": MOD_ALT, "ctrl": MOD_CONTROL, "control": MOD_CONTROL, "shift": MOD_SHIFT,
+    "win": MOD_WIN, "windows": MOD_WIN, "cmd": MOD_WIN, "meta": MOD_WIN, "super": MOD_WIN,
+}
+_NAMED_VKS = {
+    "ctrl": 0x11, "control": 0x11, "alt": 0x12, "shift": 0x10,
+    "win": 0x5B, "windows": 0x5B, "cmd": 0x5B, "meta": 0x5B, "super": 0x5B,
+    "space": 0x20, "enter": 0x0D, "return": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B,
+    "backspace": 0x08, "delete": 0x2E, "del": 0x2E, "insert": 0x2D, "home": 0x24, "end": 0x23,
+    "page up": 0x21, "pageup": 0x21, "page down": 0x22, "pagedown": 0x22,
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+    "caps lock": 0x14, "num lock": 0x90, "scroll lock": 0x91, "pause": 0x13, "print screen": 0x2C,
+    **{f"f{n}": 0x6F + n for n in range(1, 25)},
+}
+# Virtual-key codes consulted when waiting for a modifier to be released.
+_MODIFIER_VKS = {
+    "ctrl": (0x11,), "control": (0x11,), "left ctrl": (0xA2,), "right ctrl": (0xA3,),
+    "alt": (0x12,), "left alt": (0xA4,), "right alt": (0xA5,),
+    "shift": (0x10,), "left shift": (0xA0,), "right shift": (0xA1,),
+    "win": (0x5B, 0x5C), "windows": (0x5B, 0x5C), "cmd": (0x5B, 0x5C), "meta": (0x5B, 0x5C), "super": (0x5B, 0x5C),
+    "left win": (0x5B,), "left windows": (0x5B,), "right win": (0x5C,), "right windows": (0x5C,),
+}
+
+
+def _parse_hotkey(hotkey):
+    """Turn "ctrl+alt+x" into (modifier_flags, virtual_key) for RegisterHotKey.
+
+    The last '+'-separated part is the main key; it may itself be a modifier
+    name (e.g. "ctrl+alt+win" registers VK_LWIN with Ctrl+Alt held).
+    """
+    parts = [p.strip().lower() for p in hotkey.split("+")]
+    *modifiers, key = parts
+    flags = 0
+    for m in modifiers:
+        if m not in _MOD_FLAGS:
+            raise ValueError(f"Unknown modifier {m!r} in hotkey {hotkey!r}")
+        flags |= _MOD_FLAGS[m]
+    if key in _NAMED_VKS:
+        vk = _NAMED_VKS[key]
+    elif len(key) == 1:
+        scan = _user32.VkKeyScanW(key)
+        if scan == -1:
+            raise ValueError(f"Unknown key {key!r} in hotkey {hotkey!r}")
+        vk = scan & 0xFF
+    else:
+        raise ValueError(f"Unknown key {key!r} in hotkey {hotkey!r}")
+    return flags, vk
+
+
+def _is_key_held(name):
+    """True if any physical key for the modifier `name` is currently down (live OS state)."""
+    return any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MODIFIER_VKS.get(name, ()))
+
+
+class HotkeyManager:
+    """Registers global hotkeys on a dedicated message-loop thread and dispatches callbacks there."""
+
+    def __init__(self):
+        self._bindings = []        # (hotkey_str, (flags, vk), callback)
+        self._thread = None
+        self.thread_id = None
+        self._ready = threading.Event()
+        self._error = None
+
+    def register(self, hotkey, callback):
+        """Queue a hotkey for registration. Parses eagerly so bad strings fail before start()."""
+        self._bindings.append((hotkey, _parse_hotkey(hotkey), callback))
+
+    def start(self):
+        """Start the loop thread and block until every hotkey is registered. Raises on failure."""
+        self._thread = threading.Thread(target=self._loop, name="hotkeys", daemon=True)
+        self._thread.start()
+        self._ready.wait(timeout=5)
+        if self._error is not None:
+            self._thread.join(timeout=2)
+            raise self._error
+
+    def stop(self):
+        if self.thread_id is not None:
+            _user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+
+    def is_alive(self):
+        return self._thread is not None and self._thread.is_alive()
+
+    def _loop(self):
+        self.thread_id = _kernel32.GetCurrentThreadId()
+        msg = wintypes.MSG()
+        # Force creation of this thread's message queue so PostThreadMessage works immediately.
+        _user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+        registered = 0
+        try:
+            for i, (hotkey, (flags, vk), _cb) in enumerate(self._bindings, start=1):
+                if not _user32.RegisterHotKey(None, i, flags | MOD_NOREPEAT, vk):
+                    err = ctypes.get_last_error()
+                    raise OSError(err, f"RegisterHotKey failed for {hotkey!r}: {ctypes.FormatError(err).strip()}")
+                registered = i
+        except Exception as e:
+            self._error = e
+            self._unregister(registered)
+            self._ready.set()
+            return
+        self._ready.set()
+
+        while _user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == WM_HOTKEY:
+                idx = int(msg.wParam) - 1
+                if 0 <= idx < len(self._bindings):
+                    hotkey, _, callback = self._bindings[idx]
+                    try:
+                        callback()
+                    except Exception:
+                        log.exception(f"Hotkey handler for {hotkey!r} failed")
+        self._unregister(registered)
+
+    def _unregister(self, count):
+        for i in range(1, count + 1):
+            _user32.UnregisterHotKey(None, i)
+
 
 # --- Globals ---
 recording = False
@@ -381,13 +526,13 @@ def stop_recording_and_transcribe():
 def _wait_for_modifier_release(modifiers, timeout=2.0):
     """Block until none of `modifiers` is held, or `timeout` seconds pass.
 
-    Returns True if the keys were released, False on timeout. The timeout
-    matters because the `keyboard` module can miss a key-up (e.g. after lock
-    screen or RDP) and report a modifier as held forever; hotkey callbacks all
-    run on one thread, so an unbounded wait here would freeze every hotkey.
+    Returns True if the keys were released, False on timeout. Key state comes
+    from GetAsyncKeyState, so it cannot go stale; the timeout only guards
+    against a user who simply keeps holding the keys, since this can run on
+    the hotkey thread and would otherwise block every other hotkey.
     """
     deadline = time.monotonic() + timeout
-    while any(keyboard.is_pressed(m) for m in modifiers):
+    while any(_is_key_held(m) for m in modifiers):
         if time.monotonic() >= deadline:
             log.warning(f"Modifier keys still held after {timeout}s — pasting anyway")
             return False
@@ -595,10 +740,12 @@ def _run():
     setup_tray()
 
     # Register hotkeys
-    keyboard.add_hotkey(HOTKEY, toggle_recording)
-    keyboard.add_hotkey(CANCEL_HOTKEY, cancel_recording)
-    keyboard.add_hotkey(QUIT_HOTKEY, quit_app)
-    keyboard.add_hotkey(REPASTE_HOTKEY, repaste)
+    hotkeys = HotkeyManager()
+    hotkeys.register(HOTKEY, toggle_recording)
+    hotkeys.register(CANCEL_HOTKEY, cancel_recording)
+    hotkeys.register(QUIT_HOTKEY, quit_app)
+    hotkeys.register(REPASTE_HOTKEY, repaste)
+    hotkeys.start()
     log.info(f"Hotkeys: {HOTKEY} (record), {CANCEL_HOTKEY} (cancel), {REPASTE_HOTKEY} (repaste), {QUIT_HOTKEY} (quit)")
 
     # Startup beep
@@ -613,7 +760,7 @@ def _run():
     except KeyboardInterrupt:
         pass
 
-    keyboard.unhook_all()
+    hotkeys.stop()
     if tray_icon:
         tray_icon.stop()
     log.info("Goodbye")

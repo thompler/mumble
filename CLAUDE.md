@@ -31,10 +31,11 @@ Everything lives in `mumble.py` (~400 lines). Key flow:
 5. **Paste** — Copies to clipboard via `pyperclip`, then simulates Ctrl+V via `pynput`.
 6. **Tray** — `pystray` icon (green=idle, red=recording) with hotkey info and quit menu.
 
-Hotkeys are registered globally via the `keyboard` module. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit. A recording auto-cancels after `audio.max_duration` seconds (default 90) via a `threading.Timer`. A `transcribing` flag guards against starting a new recording while a transcription is still in flight; `decide_toggle_action()` encodes the start/stop/ignore state machine.
+Hotkeys are registered globally through the Win32 `RegisterHotKey` API via ctypes (`HotkeyManager`, with `MOD_NOREPEAT`); callbacks run on its message-loop thread. The modifier-release wait before pasting reads live key state via `GetAsyncKeyState`. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit. A recording auto-cancels after `audio.max_duration` seconds (default 90) via a `threading.Timer`. A `transcribing` flag guards against starting a new recording while a transcription is still in flight; `decide_toggle_action()` encodes the start/stop/ignore state machine.
 
 ## Key decisions
 
 - Spoken punctuation replacement was tried and removed — Whisper inserts commas around spoken words like "period", producing ugly output like `,:,`.
-- Windows-only: uses `winsound` for beeps, `pystray` for tray, `keyboard` for global hotkeys.
+- Windows-only: uses `winsound` for beeps, `pystray` for tray, Win32 `RegisterHotKey` for global hotkeys.
+- The `keyboard` module was replaced with `RegisterHotKey`: its low-level hook could be silently removed by Windows under load and its in-process pressed-key table could go stale, which left every hotkey dead until restart. It also re-fired on key auto-repeat.
 - Concurrency: `recording`, `transcribing`, and `audio_chunks` are module globals shared across the hotkey, audio-callback, transcription, and timeout threads. Rather than locking, the `transcribing` flag makes the record hotkey a no-op while a transcription runs, preventing a new recording from clearing `audio_chunks` mid-transcription.

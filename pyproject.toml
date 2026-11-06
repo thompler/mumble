@@ -11,7 +11,6 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "faster-whisper",
-    "keyboard",
     "pynput",
     "pystray",
     "Pillow",
