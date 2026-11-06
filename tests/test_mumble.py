@@ -106,3 +106,42 @@ def test_dev_mode_is_detected_by_pyproject_not_config(monkeypatch, tmp_path):
     assert mumble._is_dev_mode() is False, "a user config alone must not mean dev mode"
     (tmp_path / "pyproject.toml").write_text("")
     assert mumble._is_dev_mode() is True
+
+
+def _quiet_toggle_env(monkeypatch):
+    """Stub out audio, tray, beeps, and timers so toggle_recording() can run in a test."""
+    class FakeTimer:
+        def __init__(self, *a, **k): pass
+        def start(self): pass
+        def cancel(self): pass
+    monkeypatch.setattr(mumble.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: None)
+    monkeypatch.setattr(mumble, "start_recording", lambda: True)
+    monkeypatch.setattr(mumble, "update_tray", lambda s: None)
+    monkeypatch.setattr(mumble.threading, "Thread", lambda **k: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(mumble, "recording", False)
+    monkeypatch.setattr(mumble, "transcribing", False)
+    monkeypatch.setattr(mumble, "recording_timer", None)
+    monkeypatch.setattr(mumble, "_last_record_trigger", 0.0)
+
+
+def test_toggle_ignores_auto_repeat_triggers(monkeypatch):
+    _quiet_toggle_env(monkeypatch)
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    assert mumble.recording is True
+    for _ in range(10):          # key auto-repeat every ~30 ms while held
+        clock[0] += 0.03
+        mumble.toggle_recording()
+    assert mumble.recording is True, "held key must not stop the recording"
+
+
+def test_toggle_accepts_distinct_press_after_release(monkeypatch):
+    _quiet_toggle_env(monkeypatch)
+    clock = [100.0]
+    monkeypatch.setattr(mumble.time, "monotonic", lambda: clock[0])
+    mumble.toggle_recording()
+    clock[0] += 1.0
+    mumble.toggle_recording()
+    assert mumble.recording is False

@@ -186,6 +186,8 @@ input_stream = None
 tray_icon = None
 shutdown_event = threading.Event()
 recording_timer = None
+_last_record_trigger = 0.0
+RECORD_DEBOUNCE_SECONDS = 0.3
 
 
 # --- Tray icon ---
@@ -462,7 +464,17 @@ def decide_toggle_action(recording, transcribing):
 
 def toggle_recording():
     """Toggle recording on/off on hotkey press."""
-    global recording, recording_timer, transcribing
+    global recording, recording_timer, transcribing, _last_record_trigger
+
+    # Holding the combo makes the OS auto-repeat the final key (~30/s), which
+    # fires this hotkey over and over. Treat triggers arriving closer than the
+    # debounce window as the same press; each repeat extends the window, so a
+    # held key fires exactly once until it is released.
+    now = time.monotonic()
+    is_repeat = (now - _last_record_trigger) < RECORD_DEBOUNCE_SECONDS
+    _last_record_trigger = now
+    if is_repeat:
+        return
 
     action = decide_toggle_action(recording, transcribing)
 
