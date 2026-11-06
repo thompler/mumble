@@ -33,6 +33,12 @@ Everything lives in `mumble.py` (~400 lines). Key flow:
 
 Hotkeys are registered globally through the Win32 `RegisterHotKey` API via ctypes (`HotkeyManager`, with `MOD_NOREPEAT`); callbacks run on its message-loop thread. Modifier-only chords such as `ctrl+alt+win` cannot be expressed with `RegisterHotKey` (Windows accepts `VK_LWIN` as a main key but never delivers it), so `HotkeyManager` detects those by polling `GetAsyncKeyState` and firing on the rising edge. The modifier-release wait before pasting reads live key state via `GetAsyncKeyState`. All recording/transcription runs on background threads; `shutdown_event` coordinates clean exit. A recording auto-cancels after `audio.max_duration` seconds (default 90) via a `threading.Timer`. A `transcribing` flag guards against starting a new recording while a transcription is still in flight; `decide_toggle_action()` encodes the start/stop/ignore state machine.
 
+## Model usage
+
+- **Planning (Opus):** Use Opus for writing implementation plans. Plans must be self-contained and explicit enough that Sonnet or Haiku can execute them without judgment calls — every step includes exact file paths, complete before/after code, and exact commands with expected output. No "implement X" steps; show the code.
+- **Implementation (Sonnet or Haiku):** Use Sonnet for multi-file or integration tasks. Use Haiku for single-file mechanical changes with a clear spec. Implementers follow the plan exactly and do not make architectural decisions.
+- **Reviews (Opus):** Use Opus for spec-compliance and code-quality review passes.
+
 ## Key decisions
 
 - Spoken punctuation replacement was tried and removed — Whisper inserts commas around spoken words like "period", producing ugly output like `,:,`.
