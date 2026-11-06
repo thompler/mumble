@@ -304,6 +304,25 @@ def _shield_hotkeys(hotkey):
     ]
 
 
+def _probe_owned_hotkeys(hotkeys):
+    """Return the combos in `hotkeys` that some other program has already registered.
+
+    Ownership is global, so a register-then-unregister from any thread is a
+    valid probe. Used at startup to warn when a shield combo (see
+    _shield_hotkeys) cannot be captured during recording.
+    """
+    owned = []
+    for hotkey in hotkeys:
+        flags, vk = _parse_hotkey(hotkey)
+        if vk is None:
+            continue
+        if _user32.RegisterHotKey(None, 0x7FFF, flags | MOD_NOREPEAT, vk):
+            _user32.UnregisterHotKey(None, 0x7FFF)
+        else:
+            owned.append(hotkey)
+    return owned
+
+
 def _is_key_held(name):
     """True if any physical key for the modifier `name` is currently down (live OS state)."""
     return any(_is_vk_held(vk) for vk in _MODIFIER_VKS.get(name, ()))
@@ -680,15 +699,26 @@ def _wait_for_modifier_release(modifiers, timeout=2.0):
 
 
 def paste_text(text):
-    """Copy text to clipboard and paste into the active window."""
-    # Wait for modifier keys to be released (e.g. from the hotkey that triggered this)
-    _wait_for_modifier_release(HOTKEY_MODIFIERS)
-    time.sleep(0.1)
+    """Copy text to clipboard and paste into the active window.
+
+    Returns True if Ctrl+V was sent. If the hotkey's modifiers are still held
+    after the wait, the paste is skipped (False): a synthetic Ctrl+V with Alt
+    physically down reaches Windows as Ctrl+Alt+V, which is our own repaste
+    hotkey, so pasting anyway re-triggers ourselves. The text stays on the
+    clipboard and in last_transcription, so a manual Ctrl+V or the repaste
+    hotkey recovers it.
+    """
     pyperclip.copy(text)
+    if not _wait_for_modifier_release(HOTKEY_MODIFIERS):
+        log.warning("Paste skipped: modifier keys still held (text is on the clipboard)")
+        winsound.Beep(300, 200)
+        return False
+    time.sleep(0.1)
     kb.press(Key.ctrl)
     kb.press('v')
     kb.release('v')
     kb.release(Key.ctrl)
+    return True
 
 
 def repaste():
@@ -927,6 +957,13 @@ def _run():
     hotkeys.register(REPASTE_HOTKEY, repaste)
     hotkeys.start()
     log.info(f"Hotkeys: {HOTKEY} (record), {CANCEL_HOTKEY} (cancel), {REPASTE_HOTKEY} (repaste), {QUIT_HOTKEY} (quit)")
+    owned = _probe_owned_hotkeys(record_shield_hotkeys)
+    if owned:
+        log.warning(
+            f"Another program owns {', '.join(owned)}. Releasing the other modifier(s) of "
+            f"{HOTKEY} first while recording will trigger that program instead; release "
+            f"{HOTKEY.split('+')[-1]} first, or pick a record hotkey whose subsets are free."
+        )
 
     # Startup beep
     winsound.Beep(800, 100)

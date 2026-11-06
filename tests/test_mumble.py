@@ -476,3 +476,41 @@ def test_transcription_end_pops_shield(monkeypatch):
     monkeypatch.setattr(mumble, "update_tray", lambda s: None)
     mumble.stop_recording_and_transcribe()      # "No audio captured" path still ends with the pop
     assert fake.calls == [("pop",)]
+
+
+# --- Pasting with modifiers held turns Ctrl+V into Ctrl+Alt+V (our own repaste hotkey) ---
+
+def test_paste_is_skipped_when_modifiers_stay_held(monkeypatch):
+    monkeypatch.setattr(mumble, "_wait_for_modifier_release", lambda mods, timeout=2.0: False)
+    copied, pressed, beeps = [], [], []
+    monkeypatch.setattr(mumble.pyperclip, "copy", copied.append)
+    monkeypatch.setattr(mumble.kb, "press", pressed.append)
+    monkeypatch.setattr(mumble.kb, "release", lambda k: None)
+    monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: beeps.append(a))
+    monkeypatch.setattr(mumble.time, "sleep", lambda s: None)
+    assert mumble.paste_text("hi") is False
+    assert copied == ["hi"], "clipboard still gets the text so a manual Ctrl+V works"
+    assert pressed == [], "no synthetic keystrokes while modifiers are down"
+    assert beeps, "audible signal that the paste was skipped"
+
+
+def test_paste_proceeds_when_modifiers_released(monkeypatch):
+    monkeypatch.setattr(mumble, "_wait_for_modifier_release", lambda mods, timeout=2.0: True)
+    pressed = []
+    monkeypatch.setattr(mumble.pyperclip, "copy", lambda t: None)
+    monkeypatch.setattr(mumble.kb, "press", pressed.append)
+    monkeypatch.setattr(mumble.kb, "release", lambda k: None)
+    monkeypatch.setattr(mumble.time, "sleep", lambda s: None)
+    assert mumble.paste_text("hi") is True
+    assert pressed == [mumble.Key.ctrl, "v"]
+
+
+def test_probe_owned_hotkeys_reports_combos_held_by_others():
+    mgr = mumble.HotkeyManager()
+    mgr.register("ctrl+alt+shift+f24", lambda: None)
+    mgr.start()
+    try:
+        assert mumble._probe_owned_hotkeys(["ctrl+alt+shift+f24", "f24"]) == ["ctrl+alt+shift+f24"]
+    finally:
+        mgr.stop()
+    assert mumble._probe_owned_hotkeys(["ctrl+alt+shift+f24"]) == []
