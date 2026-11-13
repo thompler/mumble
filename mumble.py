@@ -25,6 +25,7 @@ import threading
 import time
 import tomllib
 import winsound
+from datetime import datetime
 from math import gcd
 
 import numpy as np
@@ -32,6 +33,7 @@ import pyperclip
 import sounddevice as sd
 from faster_whisper import WhisperModel
 from PIL import Image, ImageDraw
+from scipy.io import wavfile
 from scipy.signal import resample_poly
 from pynput.keyboard import Controller as KBController, Key
 
@@ -71,6 +73,28 @@ def _log_dir():
         return _SCRIPT_DIR
     os.makedirs(_USER_DIR, exist_ok=True)
     return _USER_DIR
+
+
+RECORDINGS_DIR = os.path.join(_log_dir(), "recordings")
+RECORDINGS_KEEP = 10
+
+
+def _save_recording(audio, rate, directory, keep=RECORDINGS_KEEP):
+    """Write float audio in [-1, 1] as a 16-bit mono WAV in directory, then prune.
+
+    Files are named rec-YYYYMMDD-HHMMSS-mmm.wav so lexical order is
+    chronological; only the newest `keep` rec-*.wav files survive. Returns the
+    path written.
+    """
+    os.makedirs(directory, exist_ok=True)
+    name = "rec-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3] + ".wav"
+    path = os.path.join(directory, name)
+    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+    wavfile.write(path, rate, pcm)
+    recs = sorted(f for f in os.listdir(directory) if f.startswith("rec-") and f.endswith(".wav"))
+    for old in recs[:-keep]:
+        os.remove(os.path.join(directory, old))
+    return path
 
 
 # --- Logging ---

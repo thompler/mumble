@@ -1,9 +1,11 @@
 """Tests for mumble's pure decision logic and error-path state resets."""
 
 import ctypes
+import os
 import threading
 import time
 
+import numpy as np
 import pytest
 
 import mumble
@@ -548,3 +550,29 @@ def test_toggle_refire_while_main_key_still_held_is_ignored(monkeypatch):
     held.add(VK_SPACE)                 # a genuine second press
     mumble.toggle_recording()
     assert mumble.recording is False
+
+# --- Debug recordings ---
+
+def test_save_recording_writes_16bit_wav(tmp_path):
+    from scipy.io import wavfile
+    audio = np.linspace(-0.5, 0.5, 16000, dtype=np.float32)
+    path = mumble._save_recording(audio, 16000, str(tmp_path / "recordings"))
+    rate, data = wavfile.read(path)
+    assert rate == 16000
+    assert data.dtype == np.int16
+    assert len(data) == 16000
+    assert os.path.basename(path).startswith("rec-") and path.endswith(".wav")
+
+
+def test_save_recording_keeps_only_newest(tmp_path):
+    d = tmp_path / "recordings"
+    d.mkdir()
+    for i in range(12):
+        (d / f"rec-20000101-0000{i:02d}-000.wav").write_bytes(b"old")
+    (d / "notes.txt").write_text("keep me")
+    path = mumble._save_recording(np.zeros(160, dtype=np.float32), 16000, str(d), keep=10)
+    recs = sorted(p.name for p in d.glob("rec-*.wav"))
+    assert len(recs) == 10
+    assert recs[-1] == os.path.basename(path), "the new recording is kept"
+    assert "rec-20000101-000000-000.wav" not in recs, "oldest pruned first"
+    assert (d / "notes.txt").exists(), "non-recording files are left alone"
