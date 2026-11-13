@@ -133,6 +133,7 @@ _DEFAULTS = {
     "whisper": {
         "model": "small.en",
         "sample_rate": 16000,
+        "vocabulary": [],
     },
     "audio": {
         "device_name": "C200",
@@ -228,6 +229,11 @@ def _vocabulary_prompt(words):
     if not terms:
         return None
     return ", ".join(terms) + "."
+
+
+# Raw config value; validated at the top of _run() like RECORD_MODE.
+VOCABULARY = _get("whisper", "vocabulary")
+INITIAL_PROMPT = None  # set by _run() from VOCABULARY
 
 # --- Slash command trigger aliases ---
 _CLAUDE_ALIASES = {"clod", "clawed", "cloud", "claud", "clogged", "klaud", "klaude"}
@@ -695,7 +701,9 @@ def stop_recording_and_transcribe():
                 log.exception("Failed to save recording")
 
         log.info("Transcribing...")
-        segments, _info = model.transcribe(audio_np, language="en", beam_size=5)
+        segments, _info = model.transcribe(
+            audio_np, language="en", beam_size=5, initial_prompt=INITIAL_PROMPT,
+        )
         text = " ".join(seg.text for seg in segments).strip()
 
         if not text:
@@ -997,9 +1005,12 @@ def main():
 
 def _run():
     """Initialise audio, model, tray and hotkeys, then block until quit."""
-    global model, device_index, record_rate, RECORD_MODE, record_release_vks, record_shield_hotkeys, hotkeys
+    global model, device_index, record_rate, RECORD_MODE, INITIAL_PROMPT, record_release_vks, record_shield_hotkeys, hotkeys
 
     RECORD_MODE = _validate_record_mode(RECORD_MODE)
+    INITIAL_PROMPT = _vocabulary_prompt(VOCABULARY)
+    if INITIAL_PROMPT:
+        log.info(f"Vocabulary hint: {INITIAL_PROMPT}")
 
     # Find C200 mic
     device_index, detected_rate = find_c200_device()

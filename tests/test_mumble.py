@@ -686,3 +686,68 @@ def test_vocabulary_prompt_all_blank_is_none():
 def test_vocabulary_prompt_rejects_non_list_of_strings(bad):
     with pytest.raises(ValueError, match="whisper.vocabulary"):
         mumble._vocabulary_prompt(bad)
+
+
+def test_default_vocabulary_is_empty():
+    assert mumble._DEFAULTS["whisper"]["vocabulary"] == []
+
+
+def test_transcription_passes_vocabulary_prompt(monkeypatch):
+    _stub_transcription(monkeypatch)
+    monkeypatch.setattr(mumble, "SAVE_RECORDINGS", False)
+    monkeypatch.setattr(mumble, "INITIAL_PROMPT", "CPI.")
+    seen = {}
+
+    class _RecordingModel:
+        def transcribe(self, audio, **kwargs):
+            seen.update(kwargs)
+            return [_Seg("hello")], None
+
+    monkeypatch.setattr(mumble, "model", _RecordingModel())
+    mumble.stop_recording_and_transcribe()
+    assert seen["initial_prompt"] == "CPI."
+
+
+def _remove_file_handlers():
+    import logging
+    for h in list(mumble.log.handlers):
+        if isinstance(h, logging.FileHandler):
+            mumble.log.removeHandler(h)
+            h.close()
+
+
+def test_main_rejects_invalid_vocabulary(monkeypatch, tmp_path, caplog):
+    import logging
+    monkeypatch.setattr("sys.argv", ["mumble"])
+    monkeypatch.setattr(mumble, "LOG_FILE", str(tmp_path / "mumble.log"))
+    monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: None)
+    monkeypatch.setattr(mumble, "VOCABULARY", "CPI")
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: pytest.fail("validation must run before device lookup"))
+    try:
+        with caplog.at_level(logging.ERROR, logger="mumble"), pytest.raises(SystemExit) as e:
+            mumble.main()
+        assert e.value.code == 1
+        assert "whisper.vocabulary" in caplog.text
+    finally:
+        _remove_file_handlers()
+
+
+def test_run_sets_initial_prompt_from_vocabulary(monkeypatch, tmp_path, caplog):
+    import logging
+    monkeypatch.setattr("sys.argv", ["mumble"])
+    monkeypatch.setattr(mumble, "LOG_FILE", str(tmp_path / "mumble.log"))
+    monkeypatch.setattr(mumble.winsound, "Beep", lambda *a: None)
+    monkeypatch.setattr(mumble, "VOCABULARY", ["CPI"])
+    monkeypatch.setattr(mumble, "INITIAL_PROMPT", None)
+
+    def stop_after_validation():
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(mumble, "find_c200_device", stop_after_validation)
+    try:
+        with caplog.at_level(logging.INFO, logger="mumble"), pytest.raises(SystemExit):
+            mumble.main()
+        assert mumble.INITIAL_PROMPT == "CPI."
+        assert "Vocabulary hint: CPI." in caplog.text
+    finally:
+        _remove_file_handlers()
