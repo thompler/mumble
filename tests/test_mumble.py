@@ -663,3 +663,26 @@ def test_save_recording_survives_locked_old_file(tmp_path, monkeypatch):
     assert "rec-20000101-000000-000.wav" in names, "locked file left in place"
     assert "rec-20000101-000001-000.wav" not in names, "pruning continues past the locked file"
     assert "rec-20000101-000002-000.wav" not in names
+
+# --- Whisper vocabulary hint ---
+
+def test_vocabulary_prompt_empty_is_none():
+    assert mumble._vocabulary_prompt([]) is None
+
+
+def test_vocabulary_prompt_single_term():
+    assert mumble._vocabulary_prompt(["CPI"]) == "CPI."
+
+
+def test_vocabulary_prompt_strips_and_drops_blanks():
+    assert mumble._vocabulary_prompt(["CPI", " Jira ", "", "  "]) == "CPI, Jira."
+
+
+def test_vocabulary_prompt_all_blank_is_none():
+    assert mumble._vocabulary_prompt(["", " "]) is None
+
+
+@pytest.mark.parametrize("bad", ["CPI", ["CPI", 3], None])
+def test_vocabulary_prompt_rejects_non_list_of_strings(bad):
+    with pytest.raises(ValueError, match="whisper.vocabulary"):
+        mumble._vocabulary_prompt(bad)

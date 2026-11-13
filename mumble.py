@@ -214,6 +214,21 @@ def _validate_record_mode(mode: str) -> str:
 # by main()'s fatal-error path instead of crashing at import.
 RECORD_MODE = _get("hotkeys", "record_mode")
 
+
+def _vocabulary_prompt(words):
+    """Turn the whisper.vocabulary list into an initial_prompt for Whisper.
+
+    ["CPI", "Jira"] -> "CPI, Jira." Entries are stripped and blanks dropped;
+    an empty result returns None (no prompt). Raises ValueError unless words
+    is a list of strings.
+    """
+    if not isinstance(words, list) or not all(isinstance(w, str) for w in words):
+        raise ValueError(f"Invalid whisper.vocabulary {words!r}: expected a list of strings")
+    terms = [w.strip() for w in words if w.strip()]
+    if not terms:
+        return None
+    return ", ".join(terms) + "."
+
 # --- Slash command trigger aliases ---
 _CLAUDE_ALIASES = {"clod", "clawed", "cloud", "claud", "clogged", "klaud", "klaude"}
 
