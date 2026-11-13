@@ -642,3 +642,24 @@ def test_save_failure_does_not_block_paste(monkeypatch):
     monkeypatch.setattr(mumble, "_save_recording", boom)
     mumble.stop_recording_and_transcribe()
     assert pasted == ["hello there"]
+
+
+def test_save_recording_survives_locked_old_file(tmp_path, monkeypatch):
+    d = tmp_path / "recordings"
+    d.mkdir()
+    for i in range(12):
+        (d / f"rec-20000101-0000{i:02d}-000.wav").write_bytes(b"old")
+    real_remove = os.remove
+
+    def remove(path):
+        if os.path.basename(path) == "rec-20000101-000000-000.wav":
+            raise PermissionError("in use")
+        real_remove(path)
+
+    monkeypatch.setattr(mumble.os, "remove", remove)
+    path = mumble._save_recording(np.zeros(160, dtype=np.float32), 16000, str(d), keep=10)
+    names = {p.name for p in d.glob("rec-*.wav")}
+    assert os.path.basename(path) in names, "new recording written and path returned"
+    assert "rec-20000101-000000-000.wav" in names, "locked file left in place"
+    assert "rec-20000101-000001-000.wav" not in names, "pruning continues past the locked file"
+    assert "rec-20000101-000002-000.wav" not in names

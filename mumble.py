@@ -93,7 +93,10 @@ def _save_recording(audio, rate, directory, keep=RECORDINGS_KEEP):
     wavfile.write(path, rate, pcm)
     recs = sorted(f for f in os.listdir(directory) if f.startswith("rec-") and f.endswith(".wav"))
     for old in recs[:-keep]:
-        os.remove(os.path.join(directory, old))
+        try:
+            os.remove(os.path.join(directory, old))
+        except OSError:
+            log.warning(f"Could not delete old recording {old}")
     return path
 
 
