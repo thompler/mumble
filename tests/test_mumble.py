@@ -576,3 +576,69 @@ def test_save_recording_keeps_only_newest(tmp_path):
     assert recs[-1] == os.path.basename(path), "the new recording is kept"
     assert "rec-20000101-000000-000.wav" not in recs, "oldest pruned first"
     assert (d / "notes.txt").exists(), "non-recording files are left alone"
+
+
+class _Seg:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeModel:
+    def __init__(self):
+        self.calls = 0
+
+    def transcribe(self, audio, **kwargs):
+        self.calls += 1
+        return [_Seg("hello there")], None
+
+
+def _stub_transcription(monkeypatch):
+    """Set up stop_recording_and_transcribe to run on 1 s of 16 kHz silence."""
+    pasted = []
+    monkeypatch.setattr(mumble, "hotkeys", None)
+    monkeypatch.setattr(mumble, "input_stream", None)
+    monkeypatch.setattr(mumble, "audio_chunks", [np.zeros((16000, 1), dtype=np.float32)])
+    monkeypatch.setattr(mumble, "record_rate", 16000)
+    monkeypatch.setattr(mumble, "update_tray", lambda s: None)
+    monkeypatch.setattr(mumble, "model", _FakeModel())
+    monkeypatch.setattr(mumble, "paste_text", pasted.append)
+    return pasted
+
+
+def test_default_save_recordings_is_off():
+    assert mumble._DEFAULTS["debug"]["save_recordings"] is False
+
+
+def test_transcription_saves_recording_when_enabled(monkeypatch, caplog):
+    import logging
+    pasted = _stub_transcription(monkeypatch)
+    saved = []
+    monkeypatch.setattr(mumble, "SAVE_RECORDINGS", True)
+    monkeypatch.setattr(mumble, "_save_recording",
+                        lambda audio, rate, directory: saved.append((len(audio), rate, directory)) or "x/rec-1.wav")
+    with caplog.at_level(logging.INFO, logger="mumble"):
+        mumble.stop_recording_and_transcribe()
+    assert saved == [(16000, 16000, mumble.RECORDINGS_DIR)]
+    assert "Saved recording: rec-1.wav" in caplog.text
+    assert pasted == ["hello there"]
+
+
+def test_transcription_skips_saving_when_disabled(monkeypatch):
+    _stub_transcription(monkeypatch)
+    saved = []
+    monkeypatch.setattr(mumble, "SAVE_RECORDINGS", False)
+    monkeypatch.setattr(mumble, "_save_recording", lambda *a, **k: saved.append(a))
+    mumble.stop_recording_and_transcribe()
+    assert saved == []
+
+
+def test_save_failure_does_not_block_paste(monkeypatch):
+    pasted = _stub_transcription(monkeypatch)
+    monkeypatch.setattr(mumble, "SAVE_RECORDINGS", True)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mumble, "_save_recording", boom)
+    mumble.stop_recording_and_transcribe()
+    assert pasted == ["hello there"]

@@ -138,6 +138,9 @@ _DEFAULTS = {
     "commands": {
         "trigger": "claude",
     },
+    "debug": {
+        "save_recordings": False,
+    },
 }
 
 CONFIG_PATH = _find_config()
@@ -167,6 +170,7 @@ WHISPER_RATE = _get("whisper", "sample_rate")
 DEVICE_NAME_SUBSTRING = _get("audio", "device_name")
 MAX_DURATION = _get("audio", "max_duration")
 COMMAND_TRIGGER = _get("commands", "trigger")
+SAVE_RECORDINGS = bool(_get("debug", "save_recordings"))
 
 
 _MODIFIER_NAMES = {"ctrl", "control", "alt", "shift", "win", "windows", "cmd", "meta", "super"}
@@ -664,6 +668,13 @@ def stop_recording_and_transcribe():
         if record_rate != WHISPER_RATE:
             g = gcd(record_rate, WHISPER_RATE)
             audio_np = resample_poly(audio_np, up=WHISPER_RATE // g, down=record_rate // g)
+
+        if SAVE_RECORDINGS:
+            try:
+                path = _save_recording(audio_np, WHISPER_RATE, RECORDINGS_DIR)
+                log.info(f"Saved recording: {os.path.basename(path)}")
+            except Exception:
+                log.exception("Failed to save recording")
 
         log.info("Transcribing...")
         segments, _info = model.transcribe(audio_np, language="en", beam_size=5)
