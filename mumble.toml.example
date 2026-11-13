@@ -15,3 +15,6 @@ max_duration = 90
 
 [commands]
 trigger = "claude"
+
+[debug]
+save_recordings = false

@@ -1,5 +1,6 @@
 *.log
 *.wav
+recordings/
 __pycache__/
 .claude/
 *.egg-info/

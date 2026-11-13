@@ -131,6 +131,9 @@ max_duration = 90
 
 [commands]
 trigger = "claude"
+
+[debug]
+save_recordings = false
 ```
 
 | Key | Default | Description |
@@ -145,3 +148,4 @@ trigger = "claude"
 | `audio.device_name` | `C200` | Mic name substring to search for |
 | `audio.max_duration` | `90` | Auto-cancel a recording after this many seconds |
 | `commands.trigger` | `claude` | Spoken word that prefixes a voice slash command |
+| `debug.save_recordings` | `false` | Save the audio Whisper hears for the last 10 recordings as WAV files in `recordings/` next to `mumble.log`. The log line `Saved recording: rec-….wav` precedes each transcription |
