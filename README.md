@@ -124,6 +124,7 @@ repaste = "ctrl+alt+v"
 [whisper]
 model = "small.en"
 sample_rate = 16000
+vocabulary = []
 
 [audio]
 device_name = "C200"
@@ -145,6 +146,7 @@ save_recordings = false
 | `hotkeys.repaste` | `ctrl+alt+v` | Re-paste last result |
 | `whisper.model` | `small.en` | Whisper model size |
 | `whisper.sample_rate` | `16000` | Target sample rate for Whisper |
+| `whisper.vocabulary` | `[]` | Terms Whisper tends to mishear, e.g. `["CPI", "Jira"]`. Passed to Whisper as a hint on every transcription. Keep it short; restart Mumble after changing it |
 | `audio.device_name` | `C200` | Mic name substring to search for |
 | `audio.max_duration` | `90` | Auto-cancel a recording after this many seconds |
 | `commands.trigger` | `claude` | Spoken word that prefixes a voice slash command |

@@ -8,6 +8,7 @@ record_mode = "hold"
 [whisper]
 model = "small.en"
 sample_rate = 16000
+vocabulary = []
 
 [audio]
 device_name = "C200"
