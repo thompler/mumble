@@ -751,3 +751,12 @@ def test_run_sets_initial_prompt_from_vocabulary(monkeypatch, tmp_path, caplog):
         assert "Vocabulary hint: CPI." in caplog.text
     finally:
         _remove_file_handlers()
+
+
+def test_save_recording_keeps_five_by_default(tmp_path):
+    d = tmp_path / "recordings"
+    d.mkdir()
+    for i in range(7):
+        (d / f"rec-20000101-0000{i:02d}-000.wav").write_bytes(b"old")
+    mumble._save_recording(np.zeros(160, dtype=np.float32), 16000, str(d))
+    assert len(list(d.glob("rec-*.wav"))) == 5

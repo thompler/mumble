@@ -76,7 +76,7 @@ def _log_dir():
 
 
 RECORDINGS_DIR = os.path.join(_log_dir(), "recordings")
-RECORDINGS_KEEP = 10
+RECORDINGS_KEEP = 5
 
 
 def _save_recording(audio, rate, directory, keep=RECORDINGS_KEEP):
