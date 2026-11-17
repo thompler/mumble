@@ -894,3 +894,29 @@ def test_start_recording_notifies_when_retry_fails(monkeypatch):
     assert refreshes == [1]
     assert notes == ["Microphone unavailable. Check that it's connected, then try again."]
     assert mumble.input_stream is None
+
+
+def test_refresh_audio_devices_notifies_on_fallback(monkeypatch):
+    notes = []
+    monkeypatch.setattr(mumble.sd, "_initialized", 1)
+    monkeypatch.setattr(mumble.sd, "_terminate", lambda: None)
+    monkeypatch.setattr(mumble.sd, "_initialize", lambda: None)
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: (None, None))
+    monkeypatch.setattr(mumble, "DEVICE_NAME_SUBSTRING", "C200")
+    monkeypatch.setattr(mumble, "_notify", notes.append)
+    monkeypatch.setattr(mumble, "device_index", 9)
+    mumble._refresh_audio_devices()
+    assert notes == ["Microphone 'C200' not found — using the default microphone."]
+
+
+def test_refresh_audio_devices_found_does_not_notify(monkeypatch):
+    notes = []
+    monkeypatch.setattr(mumble.sd, "_initialized", 1)
+    monkeypatch.setattr(mumble.sd, "_terminate", lambda: None)
+    monkeypatch.setattr(mumble.sd, "_initialize", lambda: None)
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: (4, 44100))
+    monkeypatch.setattr(mumble, "_notify", notes.append)
+    monkeypatch.setattr(mumble, "device_index", 9)
+    monkeypatch.setattr(mumble, "record_rate", 48000)
+    mumble._refresh_audio_devices()
+    assert notes == []

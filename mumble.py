@@ -661,6 +661,7 @@ def _refresh_audio_devices():
     else:
         device_index = None
         log.info("C200 not found — using system default mic")
+        _notify(f"Microphone '{DEVICE_NAME_SUBSTRING}' not found — using the default microphone.")
 
 
 def audio_callback(indata, frames, time_info, status):
