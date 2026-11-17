@@ -652,7 +652,8 @@ def _refresh_audio_devices():
     exists. Re-initialising forces a fresh scan. Only call with no stream open.
     """
     global device_index, record_rate
-    sd._terminate()
+    if sd._initialized:  # a previous refresh may have failed after terminating
+        sd._terminate()
     sd._initialize()
     index, rate = find_c200_device()
     if index is not None:
@@ -670,11 +671,11 @@ def audio_callback(indata, frames, time_info, status):
         audio_chunks.append(indata.copy())
 
 
-def start_recording():
-    """Open the mic stream via sounddevice. Returns True on success, False on failure."""
-    global audio_chunks, input_stream
-    audio_chunks = []
+MIC_UNAVAILABLE_MESSAGE = "Microphone unavailable. Check that it's connected, then try again."
 
+
+def _open_input_stream():
+    """Open and start a mic stream on the current device_index / record_rate."""
     kwargs = {
         "samplerate": record_rate,
         "channels": 1,
@@ -684,14 +685,32 @@ def start_recording():
     }
     if device_index is not None:
         kwargs["device"] = device_index
+    stream = sd.InputStream(**kwargs)
+    stream.start()
+    return stream
+
+
+def start_recording():
+    """Open the mic stream via sounddevice. Returns True on success, False on failure.
+
+    If the first open fails (typically a stale device after sleep/wake or a
+    replug), re-scan audio devices and retry once before giving up.
+    """
+    global audio_chunks, input_stream
+    audio_chunks = []
 
     try:
-        input_stream = sd.InputStream(**kwargs)
-        input_stream.start()
-    except Exception:
-        log.exception("Failed to start audio stream")
-        input_stream = None
-        return False
+        input_stream = _open_input_stream()
+    except Exception as first_error:
+        log.warning(f"Failed to open mic ({first_error}); re-scanning audio devices and retrying")
+        try:
+            _refresh_audio_devices()
+            input_stream = _open_input_stream()
+        except Exception:
+            log.exception("Failed to start audio stream")
+            input_stream = None
+            _notify(MIC_UNAVAILABLE_MESSAGE)
+            return False
     log.info(f"Recording started ({record_rate} Hz)")
     return True
 

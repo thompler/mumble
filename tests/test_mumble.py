@@ -30,6 +30,8 @@ def test_start_recording_returns_false_and_clears_stream_on_error(monkeypatch):
         raise RuntimeError("no audio device")
 
     monkeypatch.setattr(mumble.sd, "InputStream", boom)
+    monkeypatch.setattr(mumble, "_refresh_audio_devices", lambda: None)
+    monkeypatch.setattr(mumble, "_notify", lambda message: None)
     mumble.input_stream = "sentinel"  # ensure it gets cleared back to None
     assert mumble.start_recording() is False
     assert mumble.input_stream is None
@@ -792,6 +794,7 @@ def test_notify_swallows_tray_errors(monkeypatch):
 
 
 def test_refresh_audio_devices_reinitialises_and_finds_mic(monkeypatch):
+    monkeypatch.setattr(mumble.sd, "_initialized", 1)
     calls = []
     monkeypatch.setattr(mumble.sd, "_terminate", lambda: calls.append("terminate"))
     monkeypatch.setattr(mumble.sd, "_initialize", lambda: calls.append("initialize"))
@@ -805,6 +808,7 @@ def test_refresh_audio_devices_reinitialises_and_finds_mic(monkeypatch):
 
 
 def test_refresh_audio_devices_falls_back_to_default_mic(monkeypatch):
+    monkeypatch.setattr(mumble.sd, "_initialized", 1)
     monkeypatch.setattr(mumble.sd, "_terminate", lambda: None)
     monkeypatch.setattr(mumble.sd, "_initialize", lambda: None)
     monkeypatch.setattr(mumble, "find_c200_device", lambda: (None, None))
@@ -813,3 +817,80 @@ def test_refresh_audio_devices_falls_back_to_default_mic(monkeypatch):
     mumble._refresh_audio_devices()
     assert mumble.device_index is None
     assert mumble.record_rate == 48000
+
+
+def test_refresh_audio_devices_recovers_after_failed_reinit(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mumble.sd, "_initialized", 0)
+    monkeypatch.setattr(mumble.sd, "_terminate", lambda: calls.append("terminate"))
+    monkeypatch.setattr(mumble.sd, "_initialize", lambda: calls.append("initialize"))
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: (4, 44100))
+    monkeypatch.setattr(mumble, "device_index", 9)
+    monkeypatch.setattr(mumble, "record_rate", 48000)
+    mumble._refresh_audio_devices()
+    assert calls == ["initialize"], "no terminate when PortAudio is already down"
+
+
+class _FakeStream:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def start(self):
+        pass
+
+
+def _stream_factory(failures):
+    """sd.InputStream stand-in that raises for the first `failures` calls."""
+    opened = []
+
+    def make(**kwargs):
+        opened.append(kwargs)
+        if len(opened) <= failures:
+            raise RuntimeError("DirectSound error")
+        return _FakeStream(**kwargs)
+
+    return make, opened
+
+
+def test_start_recording_no_refresh_when_mic_opens(monkeypatch):
+    make, opened = _stream_factory(failures=0)
+    refreshes = []
+    monkeypatch.setattr(mumble.sd, "InputStream", make)
+    monkeypatch.setattr(mumble, "_refresh_audio_devices", lambda: refreshes.append(1))
+    monkeypatch.setattr(mumble, "input_stream", None)
+    assert mumble.start_recording() is True
+    assert len(opened) == 1
+    assert refreshes == []
+
+
+def test_start_recording_retries_after_refresh(monkeypatch):
+    make, opened = _stream_factory(failures=1)
+    notes = []
+    monkeypatch.setattr(mumble.sd, "InputStream", make)
+    monkeypatch.setattr(mumble, "device_index", 9)
+    monkeypatch.setattr(mumble, "record_rate", 48000)
+
+    def refresh():
+        mumble.device_index, mumble.record_rate = 4, 44100
+
+    monkeypatch.setattr(mumble, "_refresh_audio_devices", refresh)
+    monkeypatch.setattr(mumble, "_notify", notes.append)
+    monkeypatch.setattr(mumble, "input_stream", None)
+    assert mumble.start_recording() is True
+    assert [o["device"] for o in opened] == [9, 4], "retry uses the re-scanned device"
+    assert opened[1]["samplerate"] == 44100
+    assert notes == [], "a successful retry is not notified"
+
+
+def test_start_recording_notifies_when_retry_fails(monkeypatch):
+    make, opened = _stream_factory(failures=2)
+    refreshes, notes = [], []
+    monkeypatch.setattr(mumble.sd, "InputStream", make)
+    monkeypatch.setattr(mumble, "_refresh_audio_devices", lambda: refreshes.append(1))
+    monkeypatch.setattr(mumble, "_notify", notes.append)
+    monkeypatch.setattr(mumble, "input_stream", "sentinel")
+    assert mumble.start_recording() is False
+    assert len(opened) == 2, "exactly one retry"
+    assert refreshes == [1]
+    assert notes == ["Microphone unavailable. Check that it's connected, then try again."]
+    assert mumble.input_stream is None
