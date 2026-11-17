@@ -687,7 +687,11 @@ def _open_input_stream():
     if device_index is not None:
         kwargs["device"] = device_index
     stream = sd.InputStream(**kwargs)
-    stream.start()
+    try:
+        stream.start()
+    except Exception:
+        stream.close()
+        raise
     return stream
 
 

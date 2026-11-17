@@ -920,3 +920,22 @@ def test_refresh_audio_devices_found_does_not_notify(monkeypatch):
     monkeypatch.setattr(mumble, "record_rate", 48000)
     mumble._refresh_audio_devices()
     assert notes == []
+
+
+def test_open_input_stream_closes_stream_when_start_fails(monkeypatch):
+    closed = []
+
+    class _BadStartStream:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("start failed")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(mumble.sd, "InputStream", _BadStartStream)
+    with pytest.raises(RuntimeError, match="start failed"):
+        mumble._open_input_stream()
+    assert closed == [True]
