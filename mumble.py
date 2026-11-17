@@ -581,6 +581,16 @@ def update_tray(is_recording):
         tray_icon.title = "Mumble — Idle"
 
 
+def _notify(message):
+    """Show a tray balloon notification. Never raises."""
+    if tray_icon is None:
+        return
+    try:
+        tray_icon.notify(message, "Mumble")
+    except Exception:
+        log.exception("Failed to show notification")
+
+
 def open_log(icon, item):
     """Open the log file in VS Code."""
     subprocess.Popen(f'code "{LOG_FILE}"', shell=True)
@@ -632,6 +642,24 @@ def find_c200_device():
             log.info(f"Found C200: [{i}] {d['name']} (rate: {rate} Hz)")
             return i, rate
     return None, None
+
+
+def _refresh_audio_devices():
+    """Re-scan audio devices and re-select the configured mic.
+
+    PortAudio enumerates devices only when initialised, so after sleep/wake or
+    a USB replug the saved device index can point at a device that no longer
+    exists. Re-initialising forces a fresh scan. Only call with no stream open.
+    """
+    global device_index, record_rate
+    sd._terminate()
+    sd._initialize()
+    index, rate = find_c200_device()
+    if index is not None:
+        device_index, record_rate = index, rate
+    else:
+        device_index = None
+        log.info("C200 not found — using system default mic")
 
 
 def audio_callback(indata, frames, time_info, status):

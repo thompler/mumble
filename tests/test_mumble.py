@@ -760,3 +760,56 @@ def test_save_recording_keeps_five_by_default(tmp_path):
         (d / f"rec-20000101-0000{i:02d}-000.wav").write_bytes(b"old")
     mumble._save_recording(np.zeros(160, dtype=np.float32), 16000, str(d))
     assert len(list(d.glob("rec-*.wav"))) == 5
+
+# --- Mic reconnect ---
+
+class _FakeTray:
+    def __init__(self, fail=False):
+        self.notes = []
+        self.fail = fail
+
+    def notify(self, message, title=None):
+        if self.fail:
+            raise OSError("shell busy")
+        self.notes.append((message, title))
+
+
+def test_notify_shows_tray_balloon(monkeypatch):
+    tray = _FakeTray()
+    monkeypatch.setattr(mumble, "tray_icon", tray)
+    mumble._notify("hello")
+    assert tray.notes == [("hello", "Mumble")]
+
+
+def test_notify_without_tray_is_noop(monkeypatch):
+    monkeypatch.setattr(mumble, "tray_icon", None)
+    mumble._notify("hello")  # must not raise
+
+
+def test_notify_swallows_tray_errors(monkeypatch):
+    monkeypatch.setattr(mumble, "tray_icon", _FakeTray(fail=True))
+    mumble._notify("hello")  # must not raise
+
+
+def test_refresh_audio_devices_reinitialises_and_finds_mic(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mumble.sd, "_terminate", lambda: calls.append("terminate"))
+    monkeypatch.setattr(mumble.sd, "_initialize", lambda: calls.append("initialize"))
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: (calls.append("find"), (4, 44100))[1])
+    monkeypatch.setattr(mumble, "device_index", 9)
+    monkeypatch.setattr(mumble, "record_rate", 48000)
+    mumble._refresh_audio_devices()
+    assert calls == ["terminate", "initialize", "find"]
+    assert mumble.device_index == 4
+    assert mumble.record_rate == 44100
+
+
+def test_refresh_audio_devices_falls_back_to_default_mic(monkeypatch):
+    monkeypatch.setattr(mumble.sd, "_terminate", lambda: None)
+    monkeypatch.setattr(mumble.sd, "_initialize", lambda: None)
+    monkeypatch.setattr(mumble, "find_c200_device", lambda: (None, None))
+    monkeypatch.setattr(mumble, "device_index", 9)
+    monkeypatch.setattr(mumble, "record_rate", 48000)
+    mumble._refresh_audio_devices()
+    assert mumble.device_index is None
+    assert mumble.record_rate == 48000
