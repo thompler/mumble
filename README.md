@@ -15,7 +15,7 @@ Runs silently in the system tray with no console window.
 
 ## How it works
 
-1. **Record** — Audio is captured from your microphone while you hold the hotkey, and stops when you release it. A press shorter than 0.3 s is a tap instead: recording keeps running until the next press. Set `record_mode = "toggle"` to make every press a start/stop toggle. While a run-as-administrator window is in the foreground, Mumble cannot see key releases there, so a press in that window behaves like a tap. The tray icon turns red while recording. A recording automatically cancels after `max_duration` seconds (default 90) so a forgotten recording can't run forever.
+1. **Record** — Audio is captured from your microphone while you hold the hotkey, and stops when you release it. A press shorter than 0.3 s is a tap instead: recording keeps running until the next press. Set `record_mode = "toggle"` to make every press a start/stop toggle. While a run-as-administrator window is in the foreground, Mumble cannot see key releases there, so a press in that window behaves like a tap. The tray icon turns red while recording. A recording automatically cancels after `max_duration` seconds (default 90) so a forgotten recording can't run forever. If the microphone fails to open (for example after sleep or reconnecting it), Mumble re-scans audio devices and tries once more; if that also fails it beeps low and shows a tray notification.
 2. **Transcribe** — When recording stops, the audio is resampled to 16 kHz and fed to [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small.en` model, CPU, int8).
 3. **Paste** — The transcribed text is copied to your clipboard and pasted into the active window via `Ctrl+V`.
 
